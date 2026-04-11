@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$script_dir/../.." && pwd)"
+
+has_team_flag=false
+for arg in "$@"; do
+  case "$arg" in
+    --team|--team=*)
+      has_team_flag=true
+      ;;
+  esac
+done
+
+runner=()
+if [[ -n "${COUNCIL_BIN:-}" ]]; then
+  runner=("$COUNCIL_BIN")
+elif [[ -x "$repo_root/council" ]]; then
+  runner=("$repo_root/council")
+else
+  runner=(go run "$repo_root/cmd/council")
+fi
+
+command=("${runner[@]}" ask --stdin)
+
+if [[ -n "${COUNCIL_CONFIG:-}" ]]; then
+  command+=(--config "$COUNCIL_CONFIG")
+fi
+
+if [[ "$has_team_flag" == false ]]; then
+  command+=(--team "${COUNCIL_TEAM:-default}")
+fi
+
+if [[ -n "${COUNCIL_MAX_TIME:-}" ]]; then
+  command+=(--max-time "$COUNCIL_MAX_TIME")
+fi
+
+if [[ -n "${COUNCIL_MAX_ROUNDS:-}" ]]; then
+  command+=(--max-rounds "$COUNCIL_MAX_ROUNDS")
+fi
+
+if [[ "${COUNCIL_RETAIN_AGENT_OUTPUTS:-}" == "1" ]]; then
+  command+=(--retain-agent-outputs)
+fi
+
+if [[ "${COUNCIL_RETAIN_RAW_PROVIDER_IO:-}" == "1" ]]; then
+  command+=(--retain-raw-provider-io)
+fi
+
+if [[ "${COUNCIL_RETAIN_ARTIFACT_CONTENT:-}" == "1" ]]; then
+  command+=(--retain-artifact-content)
+fi
+
+exec "${command[@]}" "$@"
