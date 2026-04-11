@@ -34,3 +34,11 @@ func validConfig() *model.Config {
 		},
 	}
 }
+
+func fullRetention() RetentionOptions {
+	return RetentionOptions{
+		RetainAgentOutputs:    true,
+		RetainRawProviderIO:   true,
+		RetainArtifactContent: true,
+	}
+}

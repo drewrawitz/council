@@ -40,7 +40,7 @@ type Event struct {
 
 type Observer func(Event)
 
-func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, teamName string, prompt string, artifacts []model.Artifact, maxRounds int, observer Observer) (*model.RunRecord, error) {
+func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, teamName string, prompt string, artifacts []model.Artifact, maxRounds int, retention RetentionOptions, observer Observer) (*model.RunRecord, error) {
 	if maxRounds <= 0 {
 		maxRounds = 1
 	}
@@ -63,33 +63,33 @@ func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, t
 
 	notify(observer, Event{Type: EventRunStarted, RunID: runRecord.ID})
 
-	if err := repo.Save(runRecord); err != nil {
+	if err := persistRun(repo, runRecord, retention); err != nil {
 		return nil, err
 	}
 
 	providerSet, err := instantiateProviders(cfg)
 	if err != nil {
-		return failRun(repo, runRecord, err)
+		return failRun(repo, runRecord, retention, err)
 	}
 
 	var latestOutputs []model.AgentOutput
 	for round := 0; round < maxRounds; round++ {
-		latestOutputs, err = executeRound(ctx, repo, runRecord, cfg, teamName, prompt, runRecord.Artifacts, round, latestOutputs, runRecord.Items, providerSet, observer)
+		latestOutputs, err = executeRound(ctx, repo, runRecord, cfg, teamName, prompt, runRecord.Artifacts, round, latestOutputs, runRecord.Items, providerSet, retention, observer)
 		if err != nil {
-			return failRun(repo, runRecord, err)
+			return failRun(repo, runRecord, retention, err)
 		}
 
 		runRecord.CompletedRounds = round + 1
 		runRecord.Items = ExtractItems(latestOutputs)
 		roundSummary := buildRoundSummary(round, runRecord.Items)
 		runRecord.RoundSummaries = append(runRecord.RoundSummaries, roundSummary)
-		if err := repo.Save(runRecord); err != nil {
+		if err := persistRun(repo, runRecord, retention); err != nil {
 			return nil, err
 		}
 
 		if round > 0 && roundSummary.ItemHash == runRecord.RoundSummaries[len(runRecord.RoundSummaries)-2].ItemHash {
 			runRecord.StopReason = model.StopReasonConverged
-			if err := repo.Save(runRecord); err != nil {
+			if err := persistRun(repo, runRecord, retention); err != nil {
 				return nil, err
 			}
 
@@ -125,7 +125,7 @@ func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, t
 		Round:         runRecord.CompletedRounds,
 		SequenceIndex: len(latestOutputs),
 	}
-	if err := repo.Save(runRecord); err != nil {
+	if err := persistRun(repo, runRecord, retention); err != nil {
 		return nil, err
 	}
 
@@ -161,10 +161,10 @@ func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, t
 		runRecord.Synthesis.Status = "failed"
 		runRecord.Synthesis.Error = err.Error()
 		if ctxErr := executionContextError(ctx); ctxErr != nil {
-			return failRun(repo, runRecord, ctxErr)
+			return failRun(repo, runRecord, retention, ctxErr)
 		}
 
-		return failRun(repo, runRecord, fmt.Errorf("synthesis failed: %w", err))
+		return failRun(repo, runRecord, retention, fmt.Errorf("synthesis failed: %w", err))
 	}
 
 	notify(observer, Event{
@@ -182,11 +182,11 @@ func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, t
 	runRecord.CompletedAt = &completedAt
 	runRecord.Status = "completed"
 
-	if err := repo.Save(runRecord); err != nil {
+	if err := persistRun(repo, runRecord, retention); err != nil {
 		return nil, err
 	}
 
-	return runRecord, nil
+	return sanitizeRunRecord(runRecord, retention), nil
 }
 
 func executeRound(
@@ -201,6 +201,7 @@ func executeRound(
 	previousOutputs []model.AgentOutput,
 	items []model.Item,
 	providerSet map[string]providers.Provider,
+	retention RetentionOptions,
 	observer Observer,
 ) ([]model.AgentOutput, error) {
 	team := cfg.Teams[teamName]
@@ -220,7 +221,7 @@ func executeRound(
 	}
 
 	runRecord.AgentOutputs = append(runRecord.AgentOutputs, roundOutputs...)
-	if err := repo.Save(runRecord); err != nil {
+	if err := persistRun(repo, runRecord, retention); err != nil {
 		return nil, err
 	}
 
@@ -247,7 +248,7 @@ func executeRound(
 
 			mu.Lock()
 			runRecord.AgentOutputs[outputIndex].Status = "running"
-			_ = repo.Save(runRecord)
+			_ = persistRun(repo, runRecord, retention)
 			mu.Unlock()
 
 			start := time.Now()
@@ -285,7 +286,7 @@ func executeRound(
 
 			mu.Lock()
 			runRecord.AgentOutputs[outputIndex] = output
-			_ = repo.Save(runRecord)
+			_ = persistRun(repo, runRecord, retention)
 			mu.Unlock()
 
 			if err != nil {
@@ -355,18 +356,18 @@ func collectOutputErrors(outputs []model.AgentOutput) []string {
 	return problems
 }
 
-func failRun(repo *storage.Repository, record *model.RunRecord, err error) (*model.RunRecord, error) {
+func failRun(repo *storage.Repository, record *model.RunRecord, retention RetentionOptions, err error) (*model.RunRecord, error) {
 	record.Status = "failed"
 	record.Error = err.Error()
 	record.StopReason = stopReasonForError(err)
 	completedAt := time.Now().UTC()
 	record.CompletedAt = &completedAt
 
-	if saveErr := repo.Save(record); saveErr != nil {
+	if saveErr := persistRun(repo, record, retention); saveErr != nil {
 		return nil, fmt.Errorf("%v; additionally failed to persist run: %w", err, saveErr)
 	}
 
-	return record, err
+	return sanitizeRunRecord(record, retention), err
 }
 
 func stopReasonForError(err error) string {

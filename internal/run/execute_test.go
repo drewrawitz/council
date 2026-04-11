@@ -16,7 +16,7 @@ func TestExecutePersistsCompletedRunWithMockProvider(t *testing.T) {
 	t.Parallel()
 
 	repo := storage.NewRepository(filepath.Join(t.TempDir(), "runs"))
-	record, err := Execute(context.Background(), repo, validConfig(), "default", "Review this plan", nil, 1, nil)
+	record, err := Execute(context.Background(), repo, validConfig(), "default", "Review this plan", nil, 1, RetentionOptions{}, nil)
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
@@ -37,20 +37,16 @@ func TestExecutePersistsCompletedRunWithMockProvider(t *testing.T) {
 		t.Fatal("CompletedAt is nil, want completion timestamp")
 	}
 
-	if len(record.AgentOutputs) != 2 {
-		t.Fatalf("len(AgentOutputs) = %d, want 2", len(record.AgentOutputs))
+	if len(record.AgentOutputs) != 0 {
+		t.Fatalf("len(AgentOutputs) = %d, want 0 by default", len(record.AgentOutputs))
 	}
 
 	if len(record.Items) == 0 {
 		t.Fatal("len(Items) = 0, want extracted items")
 	}
 
-	if record.AgentOutputs[0].Status != "completed" || record.AgentOutputs[1].Status != "completed" {
-		t.Fatalf("agent statuses = %q and %q, want completed", record.AgentOutputs[0].Status, record.AgentOutputs[1].Status)
-	}
-
-	if record.Synthesis == nil {
-		t.Fatal("Synthesis is nil, want synthesis output")
+	if record.Synthesis != nil {
+		t.Fatalf("Synthesis = %#v, want nil by default", record.Synthesis)
 	}
 
 	if record.FinalAnswer == "" {
@@ -82,8 +78,12 @@ func TestExecutePersistsCompletedRunWithMockProvider(t *testing.T) {
 		t.Fatalf("len(loaded.RoundSummaries) = %d, want 1", len(loaded.RoundSummaries))
 	}
 
-	if loaded.AgentOutputs[0].Round != 0 || loaded.Synthesis.Round != 1 {
-		t.Fatalf("rounds = %d and %d, want 0 and 1", loaded.AgentOutputs[0].Round, loaded.Synthesis.Round)
+	if len(loaded.AgentOutputs) != 0 {
+		t.Fatalf("len(loaded.AgentOutputs) = %d, want 0 by default", len(loaded.AgentOutputs))
+	}
+
+	if loaded.Synthesis != nil {
+		t.Fatalf("loaded Synthesis = %#v, want nil by default", loaded.Synthesis)
 	}
 }
 
@@ -99,7 +99,7 @@ func TestExecutePersistsArtifactsAndInjectsThemIntoPrompts(t *testing.T) {
 		Content:     "Artifact body",
 	}}
 
-	record, err := Execute(context.Background(), repo, validConfig(), "default", "Review this plan", artifacts, 1, nil)
+	record, err := Execute(context.Background(), repo, validConfig(), "default", "Review this plan", artifacts, 1, fullRetention(), nil)
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
@@ -130,11 +130,41 @@ func TestExecutePersistsArtifactsAndInjectsThemIntoPrompts(t *testing.T) {
 	}
 }
 
+func TestExecuteOmitsArtifactContentByDefault(t *testing.T) {
+	t.Parallel()
+
+	repo := storage.NewRepository(filepath.Join(t.TempDir(), "runs"))
+	artifacts := []model.Artifact{{
+		Path:        "/tmp/brief.md",
+		SHA256:      "abc123",
+		Size:        14,
+		ContentType: "text/markdown; charset=utf-8",
+		Content:     "Artifact body",
+	}}
+
+	record, err := Execute(context.Background(), repo, validConfig(), "default", "Review this plan", artifacts, 1, RetentionOptions{}, nil)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+
+	if len(record.Artifacts) != 1 {
+		t.Fatalf("len(Artifacts) = %d, want 1", len(record.Artifacts))
+	}
+
+	if record.Artifacts[0].Content != "" {
+		t.Fatalf("artifact content = %q, want omitted by default", record.Artifacts[0].Content)
+	}
+
+	if !record.Artifacts[0].ContentOmitted {
+		t.Fatal("artifact ContentOmitted = false, want true")
+	}
+}
+
 func TestExecuteRunsCritiqueReviseRoundWhenMaxRoundsIsTwo(t *testing.T) {
 	t.Parallel()
 
 	repo := storage.NewRepository(filepath.Join(t.TempDir(), "runs"))
-	record, err := Execute(context.Background(), repo, validConfig(), "default", "Review this plan", nil, 2, nil)
+	record, err := Execute(context.Background(), repo, validConfig(), "default", "Review this plan", nil, 2, fullRetention(), nil)
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
@@ -180,7 +210,7 @@ func TestExecuteStopsEarlyWhenItemsConvergeBeforeHardCap(t *testing.T) {
 	t.Parallel()
 
 	repo := storage.NewRepository(filepath.Join(t.TempDir(), "runs"))
-	record, err := Execute(context.Background(), repo, validConfig(), "default", "Review this plan", nil, 3, nil)
+	record, err := Execute(context.Background(), repo, validConfig(), "default", "Review this plan", nil, 3, fullRetention(), nil)
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
@@ -251,7 +281,7 @@ func TestExecutePersistsFailedRunWhenAgentInvocationFails(t *testing.T) {
 	}
 
 	repo := storage.NewRepository(filepath.Join(t.TempDir(), "runs"))
-	record, err := Execute(context.Background(), repo, cfg, "default", "Review this plan", nil, 1, nil)
+	record, err := Execute(context.Background(), repo, cfg, "default", "Review this plan", nil, 1, RetentionOptions{}, nil)
 	if err == nil {
 		t.Fatal("Execute returned nil error for broken subprocess provider")
 	}
@@ -276,16 +306,8 @@ func TestExecutePersistsFailedRunWhenAgentInvocationFails(t *testing.T) {
 		t.Fatalf("Synthesis = %#v, want nil when member round fails", record.Synthesis)
 	}
 
-	if len(record.AgentOutputs) != 1 {
-		t.Fatalf("len(AgentOutputs) = %d, want 1", len(record.AgentOutputs))
-	}
-
-	if record.AgentOutputs[0].Error == "" {
-		t.Fatal("AgentOutputs[0].Error is empty")
-	}
-
-	if record.AgentOutputs[0].Status != "failed" {
-		t.Fatalf("AgentOutputs[0].Status = %q, want failed", record.AgentOutputs[0].Status)
+	if len(record.AgentOutputs) != 0 {
+		t.Fatalf("len(AgentOutputs) = %d, want 0 by default", len(record.AgentOutputs))
 	}
 
 	if !strings.Contains(record.Error, "agent round 1 failed") {
@@ -342,7 +364,7 @@ func TestExecutePersistsFailedRunWhenContextTimesOut(t *testing.T) {
 	defer cancel()
 
 	repo := storage.NewRepository(filepath.Join(t.TempDir(), "runs"))
-	record, err := Execute(ctx, repo, cfg, "default", "Review this plan", nil, 1, nil)
+	record, err := Execute(ctx, repo, cfg, "default", "Review this plan", nil, 1, RetentionOptions{}, nil)
 	if err == nil {
 		t.Fatal("Execute returned nil error for timed out run")
 	}
@@ -371,16 +393,8 @@ func TestExecutePersistsFailedRunWhenContextTimesOut(t *testing.T) {
 		t.Fatalf("run error %q did not mention timeout", record.Error)
 	}
 
-	if len(record.AgentOutputs) != 1 {
-		t.Fatalf("len(AgentOutputs) = %d, want 1", len(record.AgentOutputs))
-	}
-
-	if record.AgentOutputs[0].Status != "failed" {
-		t.Fatalf("AgentOutputs[0].Status = %q, want failed", record.AgentOutputs[0].Status)
-	}
-
-	if !strings.Contains(record.AgentOutputs[0].Error, "run timed out") {
-		t.Fatalf("AgentOutputs[0].Error = %q, want timeout error", record.AgentOutputs[0].Error)
+	if len(record.AgentOutputs) != 0 {
+		t.Fatalf("len(AgentOutputs) = %d, want 0 by default", len(record.AgentOutputs))
 	}
 
 	loaded, loadErr := repo.Load(record.ID)
@@ -394,5 +408,41 @@ func TestExecutePersistsFailedRunWhenContextTimesOut(t *testing.T) {
 
 	if !strings.Contains(loaded.Error, "run timed out") {
 		t.Fatalf("loaded Error = %q, want timeout error", loaded.Error)
+	}
+}
+
+func TestExecuteRetainsAgentOutputsWithoutRawProviderIOWhenRequested(t *testing.T) {
+	t.Parallel()
+
+	repo := storage.NewRepository(filepath.Join(t.TempDir(), "runs"))
+	record, err := Execute(
+		context.Background(),
+		repo,
+		validConfig(),
+		"default",
+		"Review this plan",
+		nil,
+		1,
+		RetentionOptions{RetainAgentOutputs: true},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+
+	if len(record.AgentOutputs) != 2 {
+		t.Fatalf("len(AgentOutputs) = %d, want 2", len(record.AgentOutputs))
+	}
+
+	if record.AgentOutputs[0].Content == "" {
+		t.Fatal("agent output content is empty")
+	}
+
+	if record.AgentOutputs[0].RawStdout != "" || record.AgentOutputs[0].RawStderr != "" {
+		t.Fatalf("raw provider IO = %q / %q, want omitted by default", record.AgentOutputs[0].RawStdout, record.AgentOutputs[0].RawStderr)
+	}
+
+	if record.Synthesis == nil {
+		t.Fatal("Synthesis is nil, want retained synthesis metadata")
 	}
 }

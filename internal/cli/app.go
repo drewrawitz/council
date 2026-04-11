@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"council/internal/config"
+	"council/internal/model"
 	"council/internal/run"
 	"council/internal/storage"
 )
@@ -73,6 +74,11 @@ func runAsk(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+	retention := run.RetentionOptions{
+		RetainAgentOutputs:    parsed.retainAgentOutputs,
+		RetainRawProviderIO:   parsed.retainRawProviderIO,
+		RetainArtifactContent: parsed.retainArtifactContent,
+	}
 
 	executionContext := context.Background()
 	cancel := func() {}
@@ -81,7 +87,7 @@ func runAsk(args []string) int {
 	}
 	defer cancel()
 
-	record, err := run.Execute(executionContext, repo, loaded.Config, parsed.teamName, prompt, artifacts, parsed.maxRounds, printRunEvent)
+	record, err := run.Execute(executionContext, repo, loaded.Config, parsed.teamName, prompt, artifacts, parsed.maxRounds, retention, printRunEvent)
 	if err != nil {
 		if parsed.maxTime > 0 && errors.Is(err, context.DeadlineExceeded) {
 			err = fmt.Errorf("run exceeded max time %s: %w", parsed.maxTime, err)
@@ -218,8 +224,14 @@ func runShow(args []string) int {
 	fmt.Printf("protocol: %s\n", record.Protocol)
 	if len(record.Artifacts) > 0 {
 		fmt.Printf("artifacts: %d\n", len(record.Artifacts))
+		if artifactsContentOmitted(record.Artifacts) {
+			fmt.Println("artifact contents: not retained")
+		}
 	}
 	fmt.Printf("rounds: %d/%d\n", record.CompletedRounds, record.MaxRounds)
+	if len(record.AgentOutputs) == 0 && record.Status != "running" {
+		fmt.Println("agent outputs: not retained")
+	}
 	if record.StopReason != "" {
 		fmt.Printf("stop reason: %s\n", record.StopReason)
 	}
@@ -240,9 +252,9 @@ func printRootUsage(stream *os.File) {
 	fmt.Fprintln(stream, "Council is a local CLI-first multi-agent deliberation engine.")
 	fmt.Fprintln(stream)
 	fmt.Fprintln(stream, "Usage:")
-	fmt.Fprintln(stream, "  council ask \"prompt\" --team <name> [--file path]... [--config path] [--max-time duration] [--max-rounds n] [--json]")
-	fmt.Fprintln(stream, "  council ask --prompt-file <path> --team <name> [--file path]... [--config path] [--max-time duration] [--max-rounds n] [--json]")
-	fmt.Fprintln(stream, "  council ask --stdin --team <name> [--file path]... [--config path] [--max-time duration] [--max-rounds n] [--json]")
+	fmt.Fprintln(stream, "  council ask \"prompt\" --team <name> [--file path]... [--config path] [--max-time duration] [--max-rounds n] [--retain-agent-outputs] [--retain-raw-provider-io] [--retain-artifact-content] [--json]")
+	fmt.Fprintln(stream, "  council ask --prompt-file <path> --team <name> [--file path]... [--config path] [--max-time duration] [--max-rounds n] [--retain-agent-outputs] [--retain-raw-provider-io] [--retain-artifact-content] [--json]")
+	fmt.Fprintln(stream, "  council ask --stdin --team <name> [--file path]... [--config path] [--max-time duration] [--max-rounds n] [--retain-agent-outputs] [--retain-raw-provider-io] [--retain-artifact-content] [--json]")
 	fmt.Fprintln(stream, "  council config validate [--config path]")
 	fmt.Fprintln(stream, "  council plan --team <name> [--config path]")
 	fmt.Fprintln(stream, "  council show <run-id> [--json]")
@@ -255,9 +267,9 @@ func printConfigUsage(stream *os.File) {
 
 func printAskUsage(stream *os.File) {
 	fmt.Fprintln(stream, "Usage:")
-	fmt.Fprintln(stream, "  council ask \"prompt\" --team <name> [--file path]... [--config path] [--max-time duration] [--max-rounds n] [--json]")
-	fmt.Fprintln(stream, "  council ask --prompt-file <path> --team <name> [--file path]... [--config path] [--max-time duration] [--max-rounds n] [--json]")
-	fmt.Fprintln(stream, "  council ask --stdin --team <name> [--file path]... [--config path] [--max-time duration] [--max-rounds n] [--json]")
+	fmt.Fprintln(stream, "  council ask \"prompt\" --team <name> [--file path]... [--config path] [--max-time duration] [--max-rounds n] [--retain-agent-outputs] [--retain-raw-provider-io] [--retain-artifact-content] [--json]")
+	fmt.Fprintln(stream, "  council ask --prompt-file <path> --team <name> [--file path]... [--config path] [--max-time duration] [--max-rounds n] [--retain-agent-outputs] [--retain-raw-provider-io] [--retain-artifact-content] [--json]")
+	fmt.Fprintln(stream, "  council ask --stdin --team <name> [--file path]... [--config path] [--max-time duration] [--max-rounds n] [--retain-agent-outputs] [--retain-raw-provider-io] [--retain-artifact-content] [--json]")
 }
 
 func printShowUsage(stream *os.File) {
@@ -266,15 +278,18 @@ func printShowUsage(stream *os.File) {
 }
 
 type askArgs struct {
-	configPath string
-	maxTime    time.Duration
-	maxRounds  int
-	teamName   string
-	filePaths  []string
-	prompt     string
-	promptFile string
-	readStdin  bool
-	jsonOutput bool
+	configPath            string
+	maxTime               time.Duration
+	maxRounds             int
+	teamName              string
+	filePaths             []string
+	retainAgentOutputs    bool
+	retainRawProviderIO   bool
+	retainArtifactContent bool
+	prompt                string
+	promptFile            string
+	readStdin             bool
+	jsonOutput            bool
 }
 
 func parseAskArgs(args []string) (*askArgs, error) {
@@ -287,6 +302,12 @@ func parseAskArgs(args []string) (*askArgs, error) {
 		switch {
 		case arg == "--json":
 			parsed.jsonOutput = true
+		case arg == "--retain-agent-outputs":
+			parsed.retainAgentOutputs = true
+		case arg == "--retain-raw-provider-io":
+			parsed.retainRawProviderIO = true
+		case arg == "--retain-artifact-content":
+			parsed.retainArtifactContent = true
 		case arg == "--config":
 			index++
 			if index >= len(args) {
@@ -385,6 +406,10 @@ func parseAskArgs(args []string) (*askArgs, error) {
 
 	if promptSourceCount > 1 {
 		return nil, fmt.Errorf("ask accepts only one prompt source at a time")
+	}
+
+	if parsed.retainRawProviderIO {
+		parsed.retainAgentOutputs = true
 	}
 
 	return parsed, nil
@@ -515,4 +540,18 @@ func loadPrompt(args *askArgs) (string, error) {
 	default:
 		return "", fmt.Errorf("ask requires a prompt source")
 	}
+}
+
+func artifactsContentOmitted(artifacts []model.Artifact) bool {
+	if len(artifacts) == 0 {
+		return false
+	}
+
+	for _, artifact := range artifacts {
+		if artifact.ContentOmitted {
+			return true
+		}
+	}
+
+	return false
 }

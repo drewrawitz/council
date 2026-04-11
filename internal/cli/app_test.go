@@ -110,3 +110,16 @@ func TestParseAskArgsRejectsInvalidMaxRounds(t *testing.T) {
 		t.Fatalf("error = %q, want invalid max rounds message", err)
 	}
 }
+
+func TestParseAskArgsSupportsRetentionFlags(t *testing.T) {
+	t.Parallel()
+
+	parsed, err := parseAskArgs([]string{"hello", "--team", "default", "--retain-raw-provider-io", "--retain-artifact-content"})
+	if err != nil {
+		t.Fatalf("parseAskArgs returned error: %v", err)
+	}
+
+	if !parsed.retainAgentOutputs || !parsed.retainRawProviderIO || !parsed.retainArtifactContent {
+		t.Fatalf("retention flags = %#v, want all true", parsed)
+	}
+}

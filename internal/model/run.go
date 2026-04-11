@@ -50,12 +50,13 @@ type RoundSummary struct {
 }
 
 type Artifact struct {
-	Path        string `json:"path"`
-	SHA256      string `json:"sha256"`
-	Size        int64  `json:"size"`
-	ContentType string `json:"content_type"`
-	Content     string `json:"content"`
-	Truncated   bool   `json:"truncated,omitempty"`
+	Path           string `json:"path"`
+	SHA256         string `json:"sha256"`
+	Size           int64  `json:"size"`
+	ContentType    string `json:"content_type"`
+	Content        string `json:"content"`
+	ContentOmitted bool   `json:"content_omitted,omitempty"`
+	Truncated      bool   `json:"truncated,omitempty"`
 }
 
 type AgentOutput struct {
