@@ -26,6 +26,8 @@ command=("${runner[@]}" ask --stdin)
 
 if [[ -n "${COUNCIL_CONFIG:-}" ]]; then
   command+=(--config "$COUNCIL_CONFIG")
+elif [[ -f "$repo_root/council.yaml" ]]; then
+  command+=(--config "$repo_root/council.yaml")
 fi
 
 if [[ "$has_team_flag" == false ]]; then

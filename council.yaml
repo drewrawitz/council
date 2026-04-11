@@ -1,0 +1,84 @@
+version: 1
+
+providers:
+  claude:
+    type: subprocess
+    command: claude
+    args:
+      - --print
+      - --output-format
+      - text
+      - --no-session-persistence
+      - --tools
+      - ""
+      - --model
+      - "{model}"
+      - --system-prompt
+      - "{system_prompt}"
+      - "{prompt}"
+    stdin: none
+
+  codex:
+    type: subprocess
+    command: codex
+    args:
+      - exec
+      - -c
+      - model_reasoning_effort="xhigh"
+      - --skip-git-repo-check
+      - --sandbox
+      - read-only
+      - --color
+      - never
+      - --model
+      - "{model}"
+      - --output-last-message
+      - "{output_file}"
+      - "-"
+    stdin: combined_prompt
+
+agents:
+  gpt-5_4-xhigh:
+    provider: codex
+    model: gpt-5.4
+    role: deep-critic
+    system_prompt: |
+      Push hard on failure modes, missing assumptions, implementation risk, and weak reasoning.
+      Prefer concrete objections over generic critique.
+
+  opus-4_6:
+    provider: claude
+    model: claude-opus-4-6
+    role: strategic-architect
+    system_prompt: |
+      Take a strategic, first-principles view.
+      Build the strongest plan, surface tradeoffs, and improve the structure of the answer.
+
+  sonnet-4_6:
+    provider: claude
+    model: claude-sonnet-4-6
+    role: synthesizer
+    system_prompt: |
+      Act as the team integrator.
+      Contribute concise integration points during rounds, then synthesize one clear final answer that resolves conflicts where possible.
+
+teams:
+  a-team:
+    members: [gpt-5_4-xhigh, opus-4_6, sonnet-4_6]
+    synthesizer: sonnet-4_6
+    protocol: single-round
+    run:
+      max_rounds: 3
+      max_time: 5m
+
+  default:
+    members: [gpt-5_4-xhigh, opus-4_6, sonnet-4_6]
+    synthesizer: sonnet-4_6
+    protocol: single-round
+    run:
+      max_rounds: 3
+      max_time: 5m
+
+protocols:
+  single-round:
+    kind: single_round
