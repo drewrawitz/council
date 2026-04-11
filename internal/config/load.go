@@ -191,10 +191,6 @@ func Validate(cfg *model.Config) error {
 			if _, ok := cfg.Agents[team.Synthesizer]; !ok {
 				problems = append(problems, fmt.Sprintf("%s.synthesizer %q does not exist", teamPath, team.Synthesizer))
 			}
-
-			if _, ok := seenMembers[team.Synthesizer]; !ok {
-				problems = append(problems, fmt.Sprintf("%s.synthesizer %q must be included in members for Phase 0/1", teamPath, team.Synthesizer))
-			}
 		}
 
 		if strings.TrimSpace(team.Protocol) == "" {

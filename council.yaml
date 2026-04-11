@@ -64,20 +64,20 @@ agents:
 
 teams:
   a-team:
-    members: [gpt-5_4-xhigh, opus-4_6, sonnet-4_6]
+    members: [gpt-5_4-xhigh, opus-4_6]
     synthesizer: sonnet-4_6
     protocol: single-round
     run:
-      max_rounds: 3
-      max_time: 5m
+      max_rounds: 2
+      max_time: 12m
 
   default:
-    members: [gpt-5_4-xhigh, opus-4_6, sonnet-4_6]
+    members: [gpt-5_4-xhigh, opus-4_6]
     synthesizer: sonnet-4_6
     protocol: single-round
     run:
-      max_rounds: 3
-      max_time: 5m
+      max_rounds: 2
+      max_time: 12m
 
 protocols:
   single-round:

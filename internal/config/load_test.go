@@ -20,7 +20,7 @@ func TestValidateAllowsSameModelWithDifferentRoles(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsSynthesizerOutsideMembers(t *testing.T) {
+func TestValidateAllowsDedicatedSynthesizerOutsideMembers(t *testing.T) {
 	t.Parallel()
 
 	cfg := validConfig()
@@ -36,13 +36,8 @@ func TestValidateRejectsSynthesizerOutsideMembers(t *testing.T) {
 		Protocol:    "single-round",
 	}
 
-	err := Validate(cfg)
-	if err == nil {
-		t.Fatal("Validate returned nil error for invalid synthesizer")
-	}
-
-	if !strings.Contains(err.Error(), "must be included in members") {
-		t.Fatalf("Validate error %q did not mention missing synthesizer membership", err)
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("Validate returned error for dedicated synthesizer: %v", err)
 	}
 }
 
