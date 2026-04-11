@@ -1,0 +1,208 @@
+package run
+
+import (
+	"context"
+	crand "crypto/rand"
+	"fmt"
+	"strings"
+	"sync"
+	"time"
+
+	"council/internal/model"
+	"council/internal/providers"
+	"council/internal/storage"
+)
+
+func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, teamName string, prompt string) (*model.RunRecord, error) {
+	plan, err := BuildPlan(cfg, teamName)
+	if err != nil {
+		return nil, err
+	}
+
+	runRecord := &model.RunRecord{
+		ID:        newRunID(),
+		Team:      teamName,
+		Protocol:  plan.ProtocolName,
+		Status:    "running",
+		Prompt:    prompt,
+		StartedAt: time.Now().UTC(),
+	}
+
+	if err := repo.Save(runRecord); err != nil {
+		return nil, err
+	}
+
+	providerSet, err := instantiateProviders(cfg)
+	if err != nil {
+		return failRun(repo, runRecord, err)
+	}
+
+	team := cfg.Teams[teamName]
+	outputs := make([]model.AgentOutput, len(team.Members))
+
+	var wg sync.WaitGroup
+	for index, memberName := range team.Members {
+		wg.Add(1)
+
+		go func(index int, memberName string) {
+			defer wg.Done()
+
+			agent := cfg.Agents[memberName]
+			start := time.Now()
+			result, err := providerSet[agent.Provider].Generate(ctx, providers.GenerateRequest{
+				RunID:        runRecord.ID,
+				AgentName:    memberName,
+				Model:        agent.Model,
+				SystemPrompt: agent.SystemPrompt,
+				UserPrompt:   prompt,
+				Settings:     agent.Settings,
+			})
+
+			outputs[index] = model.AgentOutput{
+				AgentName:     memberName,
+				Provider:      agent.Provider,
+				Model:         agent.Model,
+				Role:          agent.Role,
+				Content:       result.Content,
+				RawStdout:     result.RawStdout,
+				RawStderr:     result.RawStderr,
+				FinishReason:  result.FinishReason,
+				PromptTokens:  result.PromptTokens,
+				OutputTokens:  result.OutputTokens,
+				DurationMs:    time.Since(start).Milliseconds(),
+				Round:         0,
+				SequenceIndex: index,
+			}
+
+			if err != nil {
+				outputs[index].Error = err.Error()
+			}
+		}(index, memberName)
+	}
+
+	wg.Wait()
+	runRecord.AgentOutputs = outputs
+
+	if err := repo.Save(runRecord); err != nil {
+		return nil, err
+	}
+
+	memberErrors := collectOutputErrors(outputs)
+	if len(memberErrors) > 0 {
+		return failRun(repo, runRecord, fmt.Errorf("agent round failed:\n- %s", strings.Join(memberErrors, "\n- ")))
+	}
+
+	synthesizer := cfg.Agents[plan.Synthesizer]
+	synthesisStart := time.Now()
+	synthesisResult, err := providerSet[synthesizer.Provider].Generate(ctx, providers.GenerateRequest{
+		RunID:        runRecord.ID,
+		AgentName:    plan.Synthesizer,
+		Model:        synthesizer.Model,
+		SystemPrompt: synthesizer.SystemPrompt,
+		UserPrompt:   buildSynthesisPrompt(prompt, outputs),
+		Settings:     synthesizer.Settings,
+	})
+
+	runRecord.Synthesis = &model.AgentOutput{
+		AgentName:     plan.Synthesizer,
+		Provider:      synthesizer.Provider,
+		Model:         synthesizer.Model,
+		Role:          synthesizer.Role,
+		Content:       synthesisResult.Content,
+		RawStdout:     synthesisResult.RawStdout,
+		RawStderr:     synthesisResult.RawStderr,
+		FinishReason:  synthesisResult.FinishReason,
+		PromptTokens:  synthesisResult.PromptTokens,
+		OutputTokens:  synthesisResult.OutputTokens,
+		DurationMs:    time.Since(synthesisStart).Milliseconds(),
+		Round:         1,
+		SequenceIndex: len(outputs),
+	}
+
+	if err != nil {
+		runRecord.Synthesis.Error = err.Error()
+		return failRun(repo, runRecord, fmt.Errorf("synthesis failed: %w", err))
+	}
+
+	runRecord.FinalAnswer = synthesisResult.Content
+	completedAt := time.Now().UTC()
+	runRecord.CompletedAt = &completedAt
+	runRecord.Status = "completed"
+
+	if err := repo.Save(runRecord); err != nil {
+		return nil, err
+	}
+
+	return runRecord, nil
+}
+
+func instantiateProviders(cfg *model.Config) (map[string]providers.Provider, error) {
+	providerSet := make(map[string]providers.Provider, len(cfg.Providers))
+	for name, providerConfig := range cfg.Providers {
+		provider, err := providers.New(providerConfig)
+		if err != nil {
+			return nil, fmt.Errorf("initialize provider %q: %w", name, err)
+		}
+
+		providerSet[name] = provider
+	}
+
+	return providerSet, nil
+}
+
+func buildSynthesisPrompt(prompt string, outputs []model.AgentOutput) string {
+	var body strings.Builder
+	body.WriteString("You are synthesizing multiple agent responses into one final answer.\n\n")
+	body.WriteString("Original task:\n")
+	body.WriteString(strings.TrimSpace(prompt))
+	body.WriteString("\n\n")
+	body.WriteString("Agent responses:\n")
+
+	for _, output := range outputs {
+		body.WriteString("\n")
+		body.WriteString("## ")
+		body.WriteString(output.AgentName)
+		body.WriteString("\n")
+		body.WriteString(strings.TrimSpace(output.Content))
+		body.WriteString("\n")
+	}
+
+	body.WriteString("\nProduce one concise final answer in Markdown. Resolve disagreements where possible and note remaining uncertainty briefly when it matters.\n")
+
+	return body.String()
+}
+
+func collectOutputErrors(outputs []model.AgentOutput) []string {
+	problems := make([]string, 0)
+	for _, output := range outputs {
+		if output.Error == "" {
+			continue
+		}
+
+		problems = append(problems, fmt.Sprintf("%s: %s", output.AgentName, output.Error))
+	}
+
+	return problems
+}
+
+func failRun(repo *storage.Repository, record *model.RunRecord, err error) (*model.RunRecord, error) {
+	record.Status = "failed"
+	record.Error = err.Error()
+	completedAt := time.Now().UTC()
+	record.CompletedAt = &completedAt
+
+	if saveErr := repo.Save(record); saveErr != nil {
+		return nil, fmt.Errorf("%v; additionally failed to persist run: %w", err, saveErr)
+	}
+
+	return record, err
+}
+
+func newRunID() string {
+	randomBytes := make([]byte, 4)
+	if _, err := crand.Read(randomBytes); err != nil {
+		return time.Now().UTC().Format("20060102T150405Z")
+	}
+
+	return fmt.Sprintf("%s-%x", time.Now().UTC().Format("20060102T150405Z"), randomBytes)
+}

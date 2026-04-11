@@ -1,0 +1,41 @@
+version: 1
+
+providers:
+  mock:
+    type: mock
+
+  claude:
+    type: subprocess
+    command: claude
+    args: ["--print", "--model", "{model}"]
+
+agents:
+  analyst:
+    provider: claude
+    model: opus-4.6
+    role: analyst
+    system_prompt: |
+      You are a concise analyst.
+    settings:
+      temperature: 0.2
+      max_output_tokens: 1200
+
+  skeptic:
+    provider: claude
+    model: opus-4.6
+    role: skeptic
+    system_prompt: |
+      Challenge assumptions and surface risks.
+    settings:
+      temperature: 0.4
+      max_output_tokens: 1200
+
+teams:
+  default:
+    members: [analyst, skeptic]
+    synthesizer: analyst
+    protocol: single-round
+
+protocols:
+  single-round:
+    kind: single_round

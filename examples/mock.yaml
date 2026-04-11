@@ -1,0 +1,30 @@
+version: 1
+
+providers:
+  mock:
+    type: mock
+
+agents:
+  analyst:
+    provider: mock
+    model: mock-v1
+    role: analyst
+    system_prompt: |
+      You are a concise analyst.
+
+  skeptic:
+    provider: mock
+    model: mock-v1
+    role: skeptic
+    system_prompt: |
+      Challenge assumptions and surface risks.
+
+teams:
+  default:
+    members: [analyst, skeptic]
+    synthesizer: analyst
+    protocol: single-round
+
+protocols:
+  single-round:
+    kind: single_round
