@@ -29,6 +29,10 @@ func TestExecutePersistsCompletedRunWithMockProvider(t *testing.T) {
 		t.Fatalf("round metadata = %d/%d, want 1/1", record.CompletedRounds, record.MaxRounds)
 	}
 
+	if record.StopReason != model.StopReasonMaxRounds {
+		t.Fatalf("StopReason = %q, want %q", record.StopReason, model.StopReasonMaxRounds)
+	}
+
 	if record.CompletedAt == nil {
 		t.Fatal("CompletedAt is nil, want completion timestamp")
 	}
@@ -74,6 +78,10 @@ func TestExecutePersistsCompletedRunWithMockProvider(t *testing.T) {
 		t.Fatalf("len(loaded.Items) = %d, want %d", len(loaded.Items), len(record.Items))
 	}
 
+	if len(loaded.RoundSummaries) != 1 {
+		t.Fatalf("len(loaded.RoundSummaries) = %d, want 1", len(loaded.RoundSummaries))
+	}
+
 	if loaded.AgentOutputs[0].Round != 0 || loaded.Synthesis.Round != 1 {
 		t.Fatalf("rounds = %d and %d, want 0 and 1", loaded.AgentOutputs[0].Round, loaded.Synthesis.Round)
 	}
@@ -96,8 +104,20 @@ func TestExecuteRunsCritiqueReviseRoundWhenMaxRoundsIsTwo(t *testing.T) {
 		t.Fatalf("round metadata = %d/%d, want 2/2", record.CompletedRounds, record.MaxRounds)
 	}
 
+	if record.StopReason != model.StopReasonConverged {
+		t.Fatalf("StopReason = %q, want %q", record.StopReason, model.StopReasonConverged)
+	}
+
 	if len(record.AgentOutputs) != 4 {
 		t.Fatalf("len(AgentOutputs) = %d, want 4", len(record.AgentOutputs))
+	}
+
+	if len(record.RoundSummaries) != 2 {
+		t.Fatalf("len(RoundSummaries) = %d, want 2", len(record.RoundSummaries))
+	}
+
+	if record.RoundSummaries[0].ItemHash != record.RoundSummaries[1].ItemHash {
+		t.Fatalf("round summary hashes = %q and %q, want convergence", record.RoundSummaries[0].ItemHash, record.RoundSummaries[1].ItemHash)
 	}
 
 	if record.AgentOutputs[2].Round != 1 || record.AgentOutputs[3].Round != 1 {
@@ -110,6 +130,49 @@ func TestExecuteRunsCritiqueReviseRoundWhenMaxRoundsIsTwo(t *testing.T) {
 
 	if record.Synthesis == nil || record.Synthesis.Round != 2 {
 		t.Fatalf("synthesis = %#v, want round 2 synthesis", record.Synthesis)
+	}
+}
+
+func TestExecuteStopsEarlyWhenItemsConvergeBeforeHardCap(t *testing.T) {
+	t.Parallel()
+
+	repo := storage.NewRepository(filepath.Join(t.TempDir(), "runs"))
+	record, err := Execute(context.Background(), repo, validConfig(), "default", "Review this plan", 3, nil)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+
+	if record.Status != "completed" {
+		t.Fatalf("Status = %q, want completed", record.Status)
+	}
+
+	if record.CompletedRounds != 2 {
+		t.Fatalf("CompletedRounds = %d, want 2", record.CompletedRounds)
+	}
+
+	if record.StopReason != model.StopReasonConverged {
+		t.Fatalf("StopReason = %q, want %q", record.StopReason, model.StopReasonConverged)
+	}
+
+	if len(record.AgentOutputs) != 4 {
+		t.Fatalf("len(AgentOutputs) = %d, want 4", len(record.AgentOutputs))
+	}
+
+	if len(record.RoundSummaries) != 2 {
+		t.Fatalf("len(RoundSummaries) = %d, want 2", len(record.RoundSummaries))
+	}
+
+	if record.Synthesis == nil || record.Synthesis.Round != 2 {
+		t.Fatalf("synthesis = %#v, want synthesis after round 2", record.Synthesis)
+	}
+
+	loaded, loadErr := repo.Load(record.ID)
+	if loadErr != nil {
+		t.Fatalf("Load returned error: %v", loadErr)
+	}
+
+	if loaded.StopReason != model.StopReasonConverged {
+		t.Fatalf("loaded StopReason = %q, want %q", loaded.StopReason, model.StopReasonConverged)
 	}
 }
 
@@ -156,6 +219,10 @@ func TestExecutePersistsFailedRunWhenAgentInvocationFails(t *testing.T) {
 
 	if record.Status != "failed" {
 		t.Fatalf("Status = %q, want failed", record.Status)
+	}
+
+	if record.StopReason != model.StopReasonFailed {
+		t.Fatalf("StopReason = %q, want %q", record.StopReason, model.StopReasonFailed)
 	}
 
 	if record.CompletedAt == nil {
@@ -247,6 +314,10 @@ func TestExecutePersistsFailedRunWhenContextTimesOut(t *testing.T) {
 
 	if record.Status != "failed" {
 		t.Fatalf("Status = %q, want failed", record.Status)
+	}
+
+	if record.StopReason != model.StopReasonTimedOut {
+		t.Fatalf("StopReason = %q, want %q", record.StopReason, model.StopReasonTimedOut)
 	}
 
 	if record.CompletedAt == nil {

@@ -3,6 +3,7 @@ package run
 import (
 	"context"
 	crand "crypto/rand"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -17,6 +18,7 @@ type EventType string
 
 const (
 	EventRunStarted        EventType = "run_started"
+	EventRunStopped        EventType = "run_stopped"
 	EventAgentStarted      EventType = "agent_started"
 	EventAgentCompleted    EventType = "agent_completed"
 	EventAgentFailed       EventType = "agent_failed"
@@ -25,14 +27,15 @@ const (
 )
 
 type Event struct {
-	Type      EventType
-	RunID     string
-	Round     int
-	AgentName string
-	Provider  string
-	Model     string
-	Duration  time.Duration
-	Err       error
+	Type       EventType
+	RunID      string
+	Round      int
+	StopReason string
+	AgentName  string
+	Provider   string
+	Model      string
+	Duration   time.Duration
+	Err        error
 }
 
 type Observer func(Event)
@@ -77,15 +80,37 @@ func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, t
 
 		runRecord.CompletedRounds = round + 1
 		runRecord.Items = ExtractItems(latestOutputs)
+		roundSummary := buildRoundSummary(round, runRecord.Items)
+		runRecord.RoundSummaries = append(runRecord.RoundSummaries, roundSummary)
 		if err := repo.Save(runRecord); err != nil {
 			return nil, err
 		}
+
+		if round > 0 && roundSummary.ItemHash == runRecord.RoundSummaries[len(runRecord.RoundSummaries)-2].ItemHash {
+			runRecord.StopReason = model.StopReasonConverged
+			if err := repo.Save(runRecord); err != nil {
+				return nil, err
+			}
+
+			notify(observer, Event{
+				Type:       EventRunStopped,
+				RunID:      runRecord.ID,
+				Round:      round,
+				StopReason: runRecord.StopReason,
+			})
+			break
+		}
+	}
+
+	if runRecord.StopReason == "" {
+		runRecord.StopReason = model.StopReasonMaxRounds
 	}
 
 	synthesizer := cfg.Agents[plan.Synthesizer]
 	notify(observer, Event{
 		Type:      EventSynthesisStarted,
 		RunID:     runRecord.ID,
+		Round:     runRecord.CompletedRounds,
 		AgentName: plan.Synthesizer,
 		Provider:  synthesizer.Provider,
 		Model:     synthesizer.Model,
@@ -96,7 +121,7 @@ func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, t
 		Model:         synthesizer.Model,
 		Role:          synthesizer.Role,
 		Status:        "running",
-		Round:         maxRounds,
+		Round:         runRecord.CompletedRounds,
 		SequenceIndex: len(latestOutputs),
 	}
 	if err := repo.Save(runRecord); err != nil {
@@ -127,7 +152,7 @@ func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, t
 		PromptTokens:  synthesisResult.PromptTokens,
 		OutputTokens:  synthesisResult.OutputTokens,
 		DurationMs:    time.Since(synthesisStart).Milliseconds(),
-		Round:         maxRounds,
+		Round:         runRecord.CompletedRounds,
 		SequenceIndex: len(latestOutputs),
 	}
 
@@ -144,6 +169,7 @@ func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, t
 	notify(observer, Event{
 		Type:      EventSynthesisComplete,
 		RunID:     runRecord.ID,
+		Round:     runRecord.CompletedRounds,
 		AgentName: plan.Synthesizer,
 		Provider:  synthesizer.Provider,
 		Model:     synthesizer.Model,
@@ -330,6 +356,7 @@ func collectOutputErrors(outputs []model.AgentOutput) []string {
 func failRun(repo *storage.Repository, record *model.RunRecord, err error) (*model.RunRecord, error) {
 	record.Status = "failed"
 	record.Error = err.Error()
+	record.StopReason = stopReasonForError(err)
 	completedAt := time.Now().UTC()
 	record.CompletedAt = &completedAt
 
@@ -338,6 +365,17 @@ func failRun(repo *storage.Repository, record *model.RunRecord, err error) (*mod
 	}
 
 	return record, err
+}
+
+func stopReasonForError(err error) string {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return model.StopReasonTimedOut
+	case errors.Is(err, context.Canceled):
+		return model.StopReasonCanceled
+	default:
+		return model.StopReasonFailed
+	}
 }
 
 func newRunID() string {

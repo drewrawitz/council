@@ -210,7 +210,12 @@ func runShow(args []string) int {
 	fmt.Printf("run: %s\n", record.ID)
 	fmt.Printf("status: %s\n", record.Status)
 	fmt.Printf("team: %s\n", record.Team)
-	fmt.Printf("protocol: %s\n\n", record.Protocol)
+	fmt.Printf("protocol: %s\n", record.Protocol)
+	fmt.Printf("rounds: %d/%d\n", record.CompletedRounds, record.MaxRounds)
+	if record.StopReason != "" {
+		fmt.Printf("stop reason: %s\n", record.StopReason)
+	}
+	fmt.Println()
 	if record.FinalAnswer != "" {
 		fmt.Println(record.FinalAnswer)
 		return 0
@@ -437,6 +442,8 @@ func printRunEvent(event run.Event) {
 	switch event.Type {
 	case run.EventRunStarted:
 		fmt.Fprintf(os.Stderr, "run id: %s\n", event.RunID)
+	case run.EventRunStopped:
+		fmt.Fprintf(os.Stderr, "stopping after round %d: %s\n", event.Round+1, event.StopReason)
 	case run.EventAgentStarted:
 		fmt.Fprintf(os.Stderr, "starting round %d %s via %s (%s)\n", event.Round+1, event.AgentName, event.Provider, event.Model)
 	case run.EventAgentCompleted:

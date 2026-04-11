@@ -1,6 +1,8 @@
 package run
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"slices"
 	"strings"
@@ -325,6 +327,25 @@ func findAgentOutput(outputs []model.AgentOutput, agentName string) *model.Agent
 	}
 
 	return nil
+}
+
+func buildRoundSummary(round int, items []model.Item) model.RoundSummary {
+	return model.RoundSummary{
+		Round:     round + 1,
+		ItemCount: len(items),
+		ItemHash:  hashItems(items),
+	}
+}
+
+func hashItems(items []model.Item) string {
+	entries := make([]string, 0, len(items))
+	for _, item := range items {
+		entries = append(entries, item.Type+"|"+normalizeItemContent(item.Content))
+	}
+
+	slices.Sort(entries)
+	hash := sha256.Sum256([]byte(strings.Join(entries, "\n")))
+	return hex.EncodeToString(hash[:])
 }
 
 func stripListMarker(value string) string {
