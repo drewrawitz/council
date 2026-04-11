@@ -11,9 +11,26 @@ type RunRecord struct {
 	StartedAt    time.Time     `json:"started_at"`
 	CompletedAt  *time.Time    `json:"completed_at,omitempty"`
 	AgentOutputs []AgentOutput `json:"agent_outputs,omitempty"`
+	Items        []Item        `json:"items,omitempty"`
 	Synthesis    *AgentOutput  `json:"synthesis,omitempty"`
 	FinalAnswer  string        `json:"final_answer,omitempty"`
 	Error        string        `json:"error,omitempty"`
+}
+
+const (
+	ItemTypeClaim          = "claim"
+	ItemTypeRisk           = "risk"
+	ItemTypeRecommendation = "recommendation"
+	ItemTypeQuestion       = "question"
+	ItemStatusOpen         = "open"
+)
+
+type Item struct {
+	ID           string   `json:"id"`
+	Type         string   `json:"type"`
+	Content      string   `json:"content"`
+	SourceAgents []string `json:"source_agents,omitempty"`
+	Status       string   `json:"status"`
 }
 
 type AgentOutput struct {

@@ -33,6 +33,10 @@ func TestExecutePersistsCompletedRunWithMockProvider(t *testing.T) {
 		t.Fatalf("len(AgentOutputs) = %d, want 2", len(record.AgentOutputs))
 	}
 
+	if len(record.Items) == 0 {
+		t.Fatal("len(Items) = 0, want extracted items")
+	}
+
 	if record.AgentOutputs[0].Status != "completed" || record.AgentOutputs[1].Status != "completed" {
 		t.Fatalf("agent statuses = %q and %q, want completed", record.AgentOutputs[0].Status, record.AgentOutputs[1].Status)
 	}
@@ -45,8 +49,8 @@ func TestExecutePersistsCompletedRunWithMockProvider(t *testing.T) {
 		t.Fatal("FinalAnswer is empty")
 	}
 
-	if !strings.Contains(record.FinalAnswer, "Original task:") {
-		t.Fatalf("FinalAnswer %q did not include synthesized prompt content", record.FinalAnswer)
+	if !strings.Contains(record.FinalAnswer, "Normalized items:") {
+		t.Fatalf("FinalAnswer %q did not include normalized items section", record.FinalAnswer)
 	}
 
 	loaded, err := repo.Load(record.ID)
@@ -60,6 +64,10 @@ func TestExecutePersistsCompletedRunWithMockProvider(t *testing.T) {
 
 	if loaded.FinalAnswer != record.FinalAnswer {
 		t.Fatalf("loaded FinalAnswer = %q, want %q", loaded.FinalAnswer, record.FinalAnswer)
+	}
+
+	if len(loaded.Items) != len(record.Items) {
+		t.Fatalf("len(loaded.Items) = %d, want %d", len(loaded.Items), len(record.Items))
 	}
 
 	if loaded.AgentOutputs[0].Round != 0 || loaded.Synthesis.Round != 1 {

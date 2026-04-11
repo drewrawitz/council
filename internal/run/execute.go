@@ -201,13 +201,18 @@ func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, t
 		return nil, err
 	}
 
+	runRecord.Items = ExtractItems(outputs)
+	if err := repo.Save(runRecord); err != nil {
+		return nil, err
+	}
+
 	synthesisStart := time.Now()
 	synthesisResult, err := providerSet[synthesizer.Provider].Generate(ctx, providers.GenerateRequest{
 		RunID:        runRecord.ID,
 		AgentName:    plan.Synthesizer,
 		Model:        synthesizer.Model,
 		SystemPrompt: synthesizer.SystemPrompt,
-		UserPrompt:   buildSynthesisPrompt(prompt, outputs),
+		UserPrompt:   buildSynthesisPrompt(prompt, outputs, runRecord.Items),
 		Settings:     synthesizer.Settings,
 	})
 	err = normalizeProviderError(ctx, err)
@@ -272,28 +277,6 @@ func instantiateProviders(cfg *model.Config) (map[string]providers.Provider, err
 	}
 
 	return providerSet, nil
-}
-
-func buildSynthesisPrompt(prompt string, outputs []model.AgentOutput) string {
-	var body strings.Builder
-	body.WriteString("You are synthesizing multiple agent responses into one final answer.\n\n")
-	body.WriteString("Original task:\n")
-	body.WriteString(strings.TrimSpace(prompt))
-	body.WriteString("\n\n")
-	body.WriteString("Agent responses:\n")
-
-	for _, output := range outputs {
-		body.WriteString("\n")
-		body.WriteString("## ")
-		body.WriteString(output.AgentName)
-		body.WriteString("\n")
-		body.WriteString(strings.TrimSpace(output.Content))
-		body.WriteString("\n")
-	}
-
-	body.WriteString("\nProduce one concise final answer in Markdown. Resolve disagreements where possible and note remaining uncertainty briefly when it matters.\n")
-
-	return body.String()
 }
 
 func collectOutputErrors(outputs []model.AgentOutput) []string {
