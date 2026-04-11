@@ -1,5 +1,7 @@
 package model
 
+import "time"
+
 const (
 	ConfigVersion           = 1
 	ProviderTypeMock        = "mock"
@@ -39,11 +41,28 @@ type GenerationSettings struct {
 }
 
 type TeamConfig struct {
-	Members     []string `yaml:"members" json:"members"`
-	Synthesizer string   `yaml:"synthesizer" json:"synthesizer"`
-	Protocol    string   `yaml:"protocol" json:"protocol"`
+	Members     []string  `yaml:"members" json:"members"`
+	Synthesizer string    `yaml:"synthesizer" json:"synthesizer"`
+	Protocol    string    `yaml:"protocol" json:"protocol"`
+	Run         RunConfig `yaml:"run,omitempty" json:"run,omitempty"`
 }
 
 type ProtocolConfig struct {
 	Kind string `yaml:"kind" json:"kind"`
+}
+
+type RunConfig struct {
+	MaxRounds             *int   `yaml:"max_rounds,omitempty" json:"max_rounds,omitempty"`
+	MaxTime               string `yaml:"max_time,omitempty" json:"max_time,omitempty"`
+	RetainAgentOutputs    *bool  `yaml:"retain_agent_outputs,omitempty" json:"retain_agent_outputs,omitempty"`
+	RetainRawProviderIO   *bool  `yaml:"retain_raw_provider_io,omitempty" json:"retain_raw_provider_io,omitempty"`
+	RetainArtifactContent *bool  `yaml:"retain_artifact_content,omitempty" json:"retain_artifact_content,omitempty"`
+}
+
+type ResolvedRunConfig struct {
+	MaxRounds             int
+	MaxTime               time.Duration
+	RetainAgentOutputs    bool
+	RetainRawProviderIO   bool
+	RetainArtifactContent bool
 }

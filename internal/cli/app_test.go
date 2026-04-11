@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"council/internal/model"
 )
 
 func TestParseAskArgsSupportsPromptFile(t *testing.T) {
@@ -122,4 +124,90 @@ func TestParseAskArgsSupportsRetentionFlags(t *testing.T) {
 	if !parsed.retainAgentOutputs || !parsed.retainRawProviderIO || !parsed.retainArtifactContent {
 		t.Fatalf("retention flags = %#v, want all true", parsed)
 	}
+}
+
+func TestResolveRunSettingsUsesTeamDefaults(t *testing.T) {
+	t.Parallel()
+
+	three := 3
+	config := &model.Config{
+		Teams: map[string]model.TeamConfig{
+			"default": {
+				Run: model.RunConfig{
+					MaxRounds:             &three,
+					MaxTime:               "2m",
+					RetainAgentOutputs:    boolPtr(true),
+					RetainArtifactContent: boolPtr(true),
+				},
+			},
+		},
+	}
+
+	resolved, err := resolveRunSettings(config, &askArgs{teamName: "default"})
+	if err != nil {
+		t.Fatalf("resolveRunSettings returned error: %v", err)
+	}
+
+	if resolved.MaxRounds != 3 {
+		t.Fatalf("MaxRounds = %d, want 3", resolved.MaxRounds)
+	}
+
+	if resolved.MaxTime != 2*time.Minute {
+		t.Fatalf("MaxTime = %s, want 2m", resolved.MaxTime)
+	}
+
+	if !resolved.RetainAgentOutputs || !resolved.RetainArtifactContent {
+		t.Fatalf("resolved = %#v, want configured retention defaults", resolved)
+	}
+}
+
+func TestResolveRunSettingsAllowsCliOverrides(t *testing.T) {
+	t.Parallel()
+
+	five := 5
+	config := &model.Config{
+		Teams: map[string]model.TeamConfig{
+			"default": {
+				Run: model.RunConfig{
+					MaxRounds:           &five,
+					MaxTime:             "2m",
+					RetainAgentOutputs:  boolPtr(true),
+					RetainRawProviderIO: boolPtr(true),
+				},
+			},
+		},
+	}
+
+	resolved, err := resolveRunSettings(config, &askArgs{
+		teamName:                 "default",
+		maxRounds:                2,
+		maxRoundsSet:             true,
+		maxTime:                  30 * time.Second,
+		maxTimeSet:               true,
+		retainArtifactContent:    true,
+		retainArtifactContentSet: true,
+	})
+	if err != nil {
+		t.Fatalf("resolveRunSettings returned error: %v", err)
+	}
+
+	if resolved.MaxRounds != 2 {
+		t.Fatalf("MaxRounds = %d, want 2", resolved.MaxRounds)
+	}
+
+	if resolved.MaxTime != 30*time.Second {
+		t.Fatalf("MaxTime = %s, want 30s", resolved.MaxTime)
+	}
+
+	if !resolved.RetainAgentOutputs || !resolved.RetainRawProviderIO {
+		t.Fatalf("resolved = %#v, want team retention defaults preserved", resolved)
+	}
+
+	if !resolved.RetainArtifactContent {
+		t.Fatalf("resolved = %#v, want CLI artifact retention override", resolved)
+	}
+}
+
+func boolPtr(value bool) *bool {
+	return &value
 }

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"council/internal/model"
 )
@@ -146,6 +147,98 @@ func TestValidateAcceptsSubprocessProviderWithArgumentPlaceholders(t *testing.T)
 	}
 }
 
+func TestValidateRejectsInvalidTeamRunDefaults(t *testing.T) {
+	t.Parallel()
+
+	cfg := validConfig()
+	zero := 0
+	falseValue := false
+	cfg.Teams["default"] = model.TeamConfig{
+		Members:     []string{"analyst", "skeptic"},
+		Synthesizer: "analyst",
+		Protocol:    "single-round",
+		Run: model.RunConfig{
+			MaxRounds:           &zero,
+			MaxTime:             "soon",
+			RetainAgentOutputs:  &falseValue,
+			RetainRawProviderIO: boolPtr(true),
+		},
+	}
+
+	err := Validate(cfg)
+	if err == nil {
+		t.Fatal("Validate returned nil error for invalid team run defaults")
+	}
+
+	if !strings.Contains(err.Error(), "run.max_rounds") {
+		t.Fatalf("Validate error %q did not mention invalid max_rounds", err)
+	}
+
+	if !strings.Contains(err.Error(), "run.max_time") {
+		t.Fatalf("Validate error %q did not mention invalid max_time", err)
+	}
+
+	if !strings.Contains(err.Error(), "retain_raw_provider_io requires retain_agent_outputs") {
+		t.Fatalf("Validate error %q did not mention retention dependency", err)
+	}
+}
+
+func TestResolveTeamRunConfigAppliesTeamDefaults(t *testing.T) {
+	t.Parallel()
+
+	cfg := validConfig()
+	three := 3
+	cfg.Teams["default"] = model.TeamConfig{
+		Members:     []string{"analyst", "skeptic"},
+		Synthesizer: "analyst",
+		Protocol:    "single-round",
+		Run: model.RunConfig{
+			MaxRounds:             &three,
+			MaxTime:               "2m30s",
+			RetainRawProviderIO:   boolPtr(true),
+			RetainArtifactContent: boolPtr(true),
+		},
+	}
+
+	resolved, err := ResolveTeamRunConfig(cfg, "default")
+	if err != nil {
+		t.Fatalf("ResolveTeamRunConfig returned error: %v", err)
+	}
+
+	if resolved.MaxRounds != 3 {
+		t.Fatalf("MaxRounds = %d, want 3", resolved.MaxRounds)
+	}
+
+	if resolved.MaxTime != 150*time.Second {
+		t.Fatalf("MaxTime = %s, want 2m30s", resolved.MaxTime)
+	}
+
+	if !resolved.RetainAgentOutputs || !resolved.RetainRawProviderIO || !resolved.RetainArtifactContent {
+		t.Fatalf("resolved retention = %#v, want all true", resolved)
+	}
+}
+
+func TestResolveTeamRunConfigDefaultsToSingleRoundMinimalRetention(t *testing.T) {
+	t.Parallel()
+
+	resolved, err := ResolveTeamRunConfig(validConfig(), "default")
+	if err != nil {
+		t.Fatalf("ResolveTeamRunConfig returned error: %v", err)
+	}
+
+	if resolved.MaxRounds != 1 {
+		t.Fatalf("MaxRounds = %d, want 1", resolved.MaxRounds)
+	}
+
+	if resolved.MaxTime != 0 {
+		t.Fatalf("MaxTime = %s, want 0", resolved.MaxTime)
+	}
+
+	if resolved.RetainAgentOutputs || resolved.RetainRawProviderIO || resolved.RetainArtifactContent {
+		t.Fatalf("resolved retention = %#v, want all false", resolved)
+	}
+}
+
 func validConfig() *model.Config {
 	return &model.Config{
 		Version: model.ConfigVersion,
@@ -177,4 +270,8 @@ func validConfig() *model.Config {
 			"single-round": {Kind: model.ProtocolKindSingleRound},
 		},
 	}
+}
+
+func boolPtr(value bool) *bool {
+	return &value
 }

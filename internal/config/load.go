@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -201,6 +202,22 @@ func Validate(cfg *model.Config) error {
 		} else if _, ok := cfg.Protocols[team.Protocol]; !ok {
 			problems = append(problems, fmt.Sprintf("%s.protocol %q does not exist", teamPath, team.Protocol))
 		}
+
+		if team.Run.MaxRounds != nil && *team.Run.MaxRounds <= 0 {
+			problems = append(problems, fmt.Sprintf("%s.run.max_rounds must be greater than 0", teamPath))
+		}
+
+		if strings.TrimSpace(team.Run.MaxTime) != "" {
+			if _, err := time.ParseDuration(team.Run.MaxTime); err != nil {
+				problems = append(problems, fmt.Sprintf("%s.run.max_time %q is invalid", teamPath, team.Run.MaxTime))
+			}
+		}
+
+		if team.Run.RetainRawProviderIO != nil && *team.Run.RetainRawProviderIO {
+			if team.Run.RetainAgentOutputs != nil && !*team.Run.RetainAgentOutputs {
+				problems = append(problems, fmt.Sprintf("%s.run.retain_raw_provider_io requires retain_agent_outputs", teamPath))
+			}
+		}
 	}
 
 	if len(problems) > 0 {
@@ -208,6 +225,48 @@ func Validate(cfg *model.Config) error {
 	}
 
 	return nil
+}
+
+func ResolveTeamRunConfig(cfg *model.Config, teamName string) (model.ResolvedRunConfig, error) {
+	resolved := model.ResolvedRunConfig{MaxRounds: 1}
+	if cfg == nil {
+		return resolved, errors.New("config is required")
+	}
+
+	team, ok := cfg.Teams[teamName]
+	if !ok {
+		return resolved, fmt.Errorf("team %q does not exist", teamName)
+	}
+
+	if team.Run.MaxRounds != nil {
+		resolved.MaxRounds = *team.Run.MaxRounds
+	}
+
+	if strings.TrimSpace(team.Run.MaxTime) != "" {
+		maxTime, err := time.ParseDuration(team.Run.MaxTime)
+		if err != nil {
+			return resolved, fmt.Errorf("team %q run.max_time %q is invalid: %w", teamName, team.Run.MaxTime, err)
+		}
+
+		resolved.MaxTime = maxTime
+	}
+
+	if team.Run.RetainAgentOutputs != nil {
+		resolved.RetainAgentOutputs = *team.Run.RetainAgentOutputs
+	}
+
+	if team.Run.RetainRawProviderIO != nil {
+		resolved.RetainRawProviderIO = *team.Run.RetainRawProviderIO
+		if resolved.RetainRawProviderIO {
+			resolved.RetainAgentOutputs = true
+		}
+	}
+
+	if team.Run.RetainArtifactContent != nil {
+		resolved.RetainArtifactContent = *team.Run.RetainArtifactContent
+	}
+
+	return resolved, nil
 }
 
 func resolvePath(path string) (string, error) {

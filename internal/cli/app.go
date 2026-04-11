@@ -74,23 +74,28 @@ func runAsk(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+	resolvedRunConfig, err := resolveRunSettings(loaded.Config, parsed)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 	retention := run.RetentionOptions{
-		RetainAgentOutputs:    parsed.retainAgentOutputs,
-		RetainRawProviderIO:   parsed.retainRawProviderIO,
-		RetainArtifactContent: parsed.retainArtifactContent,
+		RetainAgentOutputs:    resolvedRunConfig.RetainAgentOutputs,
+		RetainRawProviderIO:   resolvedRunConfig.RetainRawProviderIO,
+		RetainArtifactContent: resolvedRunConfig.RetainArtifactContent,
 	}
 
 	executionContext := context.Background()
 	cancel := func() {}
-	if parsed.maxTime > 0 {
-		executionContext, cancel = context.WithTimeout(executionContext, parsed.maxTime)
+	if resolvedRunConfig.MaxTime > 0 {
+		executionContext, cancel = context.WithTimeout(executionContext, resolvedRunConfig.MaxTime)
 	}
 	defer cancel()
 
-	record, err := run.Execute(executionContext, repo, loaded.Config, parsed.teamName, prompt, artifacts, parsed.maxRounds, retention, printRunEvent)
+	record, err := run.Execute(executionContext, repo, loaded.Config, parsed.teamName, prompt, artifacts, resolvedRunConfig.MaxRounds, retention, printRunEvent)
 	if err != nil {
-		if parsed.maxTime > 0 && errors.Is(err, context.DeadlineExceeded) {
-			err = fmt.Errorf("run exceeded max time %s: %w", parsed.maxTime, err)
+		if resolvedRunConfig.MaxTime > 0 && errors.Is(err, context.DeadlineExceeded) {
+			err = fmt.Errorf("run exceeded max time %s: %w", resolvedRunConfig.MaxTime, err)
 		}
 
 		if record != nil {
@@ -278,22 +283,27 @@ func printShowUsage(stream *os.File) {
 }
 
 type askArgs struct {
-	configPath            string
-	maxTime               time.Duration
-	maxRounds             int
-	teamName              string
-	filePaths             []string
-	retainAgentOutputs    bool
-	retainRawProviderIO   bool
-	retainArtifactContent bool
-	prompt                string
-	promptFile            string
-	readStdin             bool
-	jsonOutput            bool
+	configPath               string
+	maxTime                  time.Duration
+	maxTimeSet               bool
+	maxRounds                int
+	maxRoundsSet             bool
+	teamName                 string
+	filePaths                []string
+	retainAgentOutputs       bool
+	retainAgentOutputsSet    bool
+	retainRawProviderIO      bool
+	retainRawProviderIOSet   bool
+	retainArtifactContent    bool
+	retainArtifactContentSet bool
+	prompt                   string
+	promptFile               string
+	readStdin                bool
+	jsonOutput               bool
 }
 
 func parseAskArgs(args []string) (*askArgs, error) {
-	parsed := &askArgs{maxRounds: 1}
+	parsed := &askArgs{}
 	promptParts := make([]string, 0)
 
 	for index := 0; index < len(args); index++ {
@@ -304,10 +314,13 @@ func parseAskArgs(args []string) (*askArgs, error) {
 			parsed.jsonOutput = true
 		case arg == "--retain-agent-outputs":
 			parsed.retainAgentOutputs = true
+			parsed.retainAgentOutputsSet = true
 		case arg == "--retain-raw-provider-io":
 			parsed.retainRawProviderIO = true
+			parsed.retainRawProviderIOSet = true
 		case arg == "--retain-artifact-content":
 			parsed.retainArtifactContent = true
+			parsed.retainArtifactContentSet = true
 		case arg == "--config":
 			index++
 			if index >= len(args) {
@@ -327,12 +340,14 @@ func parseAskArgs(args []string) (*askArgs, error) {
 				return nil, err
 			}
 			parsed.maxTime = maxTime
+			parsed.maxTimeSet = true
 		case strings.HasPrefix(arg, "--max-time="):
 			maxTime, err := parseMaxTime(strings.TrimPrefix(arg, "--max-time="))
 			if err != nil {
 				return nil, err
 			}
 			parsed.maxTime = maxTime
+			parsed.maxTimeSet = true
 		case arg == "--max-rounds":
 			index++
 			if index >= len(args) {
@@ -344,12 +359,14 @@ func parseAskArgs(args []string) (*askArgs, error) {
 				return nil, err
 			}
 			parsed.maxRounds = maxRounds
+			parsed.maxRoundsSet = true
 		case strings.HasPrefix(arg, "--max-rounds="):
 			maxRounds, err := parseMaxRounds(strings.TrimPrefix(arg, "--max-rounds="))
 			if err != nil {
 				return nil, err
 			}
 			parsed.maxRounds = maxRounds
+			parsed.maxRoundsSet = true
 		case arg == "--file":
 			index++
 			if index >= len(args) {
@@ -410,6 +427,7 @@ func parseAskArgs(args []string) (*askArgs, error) {
 
 	if parsed.retainRawProviderIO {
 		parsed.retainAgentOutputs = true
+		parsed.retainAgentOutputsSet = true
 	}
 
 	return parsed, nil
@@ -554,4 +572,40 @@ func artifactsContentOmitted(artifacts []model.Artifact) bool {
 	}
 
 	return false
+}
+
+func resolveRunSettings(cfg *model.Config, args *askArgs) (model.ResolvedRunConfig, error) {
+	if args == nil {
+		return model.ResolvedRunConfig{}, fmt.Errorf("ask arguments are required")
+	}
+
+	resolved, err := config.ResolveTeamRunConfig(cfg, args.teamName)
+	if err != nil {
+		return model.ResolvedRunConfig{}, err
+	}
+
+	if args.maxRoundsSet {
+		resolved.MaxRounds = args.maxRounds
+	}
+
+	if args.maxTimeSet {
+		resolved.MaxTime = args.maxTime
+	}
+
+	if args.retainAgentOutputsSet {
+		resolved.RetainAgentOutputs = args.retainAgentOutputs
+	}
+
+	if args.retainRawProviderIOSet {
+		resolved.RetainRawProviderIO = args.retainRawProviderIO
+		if resolved.RetainRawProviderIO {
+			resolved.RetainAgentOutputs = true
+		}
+	}
+
+	if args.retainArtifactContentSet {
+		resolved.RetainArtifactContent = args.retainArtifactContent
+	}
+
+	return resolved, nil
 }

@@ -57,6 +57,9 @@ teams:
     members: [claude-architect, codex-reviewer]
     synthesizer: claude-architect
     protocol: single-round
+    run:
+      max_rounds: 3
+      max_time: 3m
 
 protocols:
   single-round:
