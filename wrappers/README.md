@@ -8,6 +8,24 @@ Recommended mental model:
 - let the host gather context, use skills, inspect code, and translate screenshots into text
 - hand Council a clean task brief plus any local text artifacts
 
+Recommended usage in the host tool:
+- speak to `/council` in natural language
+- mention host actions directly, for example: `use the gh CLI to review pr 471`
+- mention teams naturally, for example: `use the A-team`
+- mention run parameters naturally, for example: `run 2 rounds` or `stop after 90 seconds`
+- reference files naturally with `@path/to/file`
+
+Use `/council-config` when you want to change persistent team definitions or run defaults in `council.yaml`.
+
+The slash-command layer should:
+- interpret that natural-language request
+- use host tools first when requested
+- treat `@file` references as host-side text context by default
+- only use Council `--file` when you intentionally want persisted artifact metadata/content
+- translate team mentions like `A-team` into `--team a-team`
+- translate explicit runtime requests like `run 2 rounds` into the matching Council flags
+- default to `a-team` when no team is specified
+
 Available entrypoints:
 - `wrappers/claude/council`
 - `wrappers/opencode/council`
@@ -18,6 +36,7 @@ Both wrappers:
 - pass any CLI flags through unchanged
 - optionally fill defaults from environment variables
 - automatically use `<repo>/council.yaml` when `COUNCIL_CONFIG` is not set
+- default to `a-team` when no `--team` or `COUNCIL_TEAM` is provided
 
 Supported environment variables:
 - `COUNCIL_BIN`: explicit `council` binary path
@@ -42,7 +61,8 @@ printf 'Review this plan' | wrappers/opencode/council --team a-team --json
 For screenshots and rich host context:
 - paste the screenshot into Claude Code or OpenCode
 - let the host model describe or OCR it into text
-- pass that text directly in the prompt, or save it to a local `.md` file and attach it with `--file`
+- pass that text directly in the prompt
+- save it to a local `.md` file and use `--file` only if you explicitly want Council to retain it as an artifact
 
 Today Council itself only ingests local text artifacts. Images and screenshots should be converted to text by the host first.
 

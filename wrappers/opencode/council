@@ -31,7 +31,7 @@ elif [[ -f "$repo_root/council.yaml" ]]; then
 fi
 
 if [[ "$has_team_flag" == false ]]; then
-  command+=(--team "${COUNCIL_TEAM:-default}")
+  command+=(--team "${COUNCIL_TEAM:-a-team}")
 fi
 
 if [[ -n "${COUNCIL_MAX_TIME:-}" ]]; then
