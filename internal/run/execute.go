@@ -111,6 +111,7 @@ func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, t
 				UserPrompt:   prompt,
 				Settings:     agent.Settings,
 			})
+			err = normalizeProviderError(ctx, err)
 
 			outputs[index] = model.AgentOutput{
 				AgentName:     memberName,
@@ -170,6 +171,10 @@ func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, t
 		return nil, err
 	}
 
+	if err := executionContextError(ctx); err != nil {
+		return failRun(repo, runRecord, err)
+	}
+
 	memberErrors := collectOutputErrors(outputs)
 	if len(memberErrors) > 0 {
 		return failRun(repo, runRecord, fmt.Errorf("agent round failed:\n- %s", strings.Join(memberErrors, "\n- ")))
@@ -183,6 +188,19 @@ func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, t
 		Provider:  synthesizer.Provider,
 		Model:     synthesizer.Model,
 	})
+	runRecord.Synthesis = &model.AgentOutput{
+		AgentName:     plan.Synthesizer,
+		Provider:      synthesizer.Provider,
+		Model:         synthesizer.Model,
+		Role:          synthesizer.Role,
+		Status:        "running",
+		Round:         1,
+		SequenceIndex: len(outputs),
+	}
+	if err := repo.Save(runRecord); err != nil {
+		return nil, err
+	}
+
 	synthesisStart := time.Now()
 	synthesisResult, err := providerSet[synthesizer.Provider].Generate(ctx, providers.GenerateRequest{
 		RunID:        runRecord.ID,
@@ -192,12 +210,14 @@ func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, t
 		UserPrompt:   buildSynthesisPrompt(prompt, outputs),
 		Settings:     synthesizer.Settings,
 	})
+	err = normalizeProviderError(ctx, err)
 
 	runRecord.Synthesis = &model.AgentOutput{
 		AgentName:     plan.Synthesizer,
 		Provider:      synthesizer.Provider,
 		Model:         synthesizer.Model,
 		Role:          synthesizer.Role,
+		Status:        "completed",
 		Content:       synthesisResult.Content,
 		RawStdout:     synthesisResult.RawStdout,
 		RawStderr:     synthesisResult.RawStderr,
@@ -210,7 +230,12 @@ func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, t
 	}
 
 	if err != nil {
+		runRecord.Synthesis.Status = "failed"
 		runRecord.Synthesis.Error = err.Error()
+		if ctxErr := executionContextError(ctx); ctxErr != nil {
+			return failRun(repo, runRecord, ctxErr)
+		}
+
 		return failRun(repo, runRecord, fmt.Errorf("synthesis failed: %w", err))
 	}
 
@@ -312,4 +337,33 @@ func notify(observer Observer, event Event) {
 	}
 
 	observer(event)
+}
+
+func normalizeProviderError(ctx context.Context, err error) error {
+	if err == nil {
+		return nil
+	}
+
+	if ctxErr := executionContextError(ctx); ctxErr != nil {
+		return ctxErr
+	}
+
+	return err
+}
+
+func executionContextError(ctx context.Context) error {
+	if ctx == nil {
+		return nil
+	}
+
+	switch ctx.Err() {
+	case nil:
+		return nil
+	case context.DeadlineExceeded:
+		return fmt.Errorf("run timed out: %w", ctx.Err())
+	case context.Canceled:
+		return fmt.Errorf("run canceled: %w", ctx.Err())
+	default:
+		return ctx.Err()
+	}
 }

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestParseAskArgsSupportsPromptFile(t *testing.T) {
@@ -55,5 +56,31 @@ func TestLoadPromptFromFile(t *testing.T) {
 
 	if prompt != "Review this plan" {
 		t.Fatalf("prompt = %q, want trimmed file contents", prompt)
+	}
+}
+
+func TestParseAskArgsSupportsMaxTime(t *testing.T) {
+	t.Parallel()
+
+	parsed, err := parseAskArgs([]string{"hello", "--team", "default", "--max-time", "45s"})
+	if err != nil {
+		t.Fatalf("parseAskArgs returned error: %v", err)
+	}
+
+	if parsed.maxTime != 45*time.Second {
+		t.Fatalf("maxTime = %s, want 45s", parsed.maxTime)
+	}
+}
+
+func TestParseAskArgsRejectsInvalidMaxTime(t *testing.T) {
+	t.Parallel()
+
+	_, err := parseAskArgs([]string{"hello", "--team", "default", "--max-time", "soon"})
+	if err == nil {
+		t.Fatal("parseAskArgs returned nil error for invalid max time")
+	}
+
+	if err.Error() != "invalid --max-time \"soon\": time: invalid duration \"soon\"" {
+		t.Fatalf("error = %q, want invalid max time message", err)
 	}
 }

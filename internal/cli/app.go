@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -67,8 +68,19 @@ func runAsk(args []string) int {
 		return 1
 	}
 
-	record, err := run.Execute(context.Background(), repo, loaded.Config, parsed.teamName, prompt, printRunEvent)
+	executionContext := context.Background()
+	cancel := func() {}
+	if parsed.maxTime > 0 {
+		executionContext, cancel = context.WithTimeout(executionContext, parsed.maxTime)
+	}
+	defer cancel()
+
+	record, err := run.Execute(executionContext, repo, loaded.Config, parsed.teamName, prompt, printRunEvent)
 	if err != nil {
+		if parsed.maxTime > 0 && errors.Is(err, context.DeadlineExceeded) {
+			err = fmt.Errorf("run exceeded max time %s: %w", parsed.maxTime, err)
+		}
+
 		if record != nil {
 			fmt.Fprintf(os.Stderr, "run failed: %s\nrun id: %s\n", err, record.ID)
 		} else {
@@ -214,9 +226,9 @@ func printRootUsage(stream *os.File) {
 	fmt.Fprintln(stream, "Council is a local CLI-first multi-agent deliberation engine.")
 	fmt.Fprintln(stream)
 	fmt.Fprintln(stream, "Usage:")
-	fmt.Fprintln(stream, "  council ask \"prompt\" --team <name> [--config path] [--json]")
-	fmt.Fprintln(stream, "  council ask --prompt-file <path> --team <name> [--config path] [--json]")
-	fmt.Fprintln(stream, "  council ask --stdin --team <name> [--config path] [--json]")
+	fmt.Fprintln(stream, "  council ask \"prompt\" --team <name> [--config path] [--max-time duration] [--json]")
+	fmt.Fprintln(stream, "  council ask --prompt-file <path> --team <name> [--config path] [--max-time duration] [--json]")
+	fmt.Fprintln(stream, "  council ask --stdin --team <name> [--config path] [--max-time duration] [--json]")
 	fmt.Fprintln(stream, "  council config validate [--config path]")
 	fmt.Fprintln(stream, "  council plan --team <name> [--config path]")
 	fmt.Fprintln(stream, "  council show <run-id> [--json]")
@@ -229,9 +241,9 @@ func printConfigUsage(stream *os.File) {
 
 func printAskUsage(stream *os.File) {
 	fmt.Fprintln(stream, "Usage:")
-	fmt.Fprintln(stream, "  council ask \"prompt\" --team <name> [--config path] [--json]")
-	fmt.Fprintln(stream, "  council ask --prompt-file <path> --team <name> [--config path] [--json]")
-	fmt.Fprintln(stream, "  council ask --stdin --team <name> [--config path] [--json]")
+	fmt.Fprintln(stream, "  council ask \"prompt\" --team <name> [--config path] [--max-time duration] [--json]")
+	fmt.Fprintln(stream, "  council ask --prompt-file <path> --team <name> [--config path] [--max-time duration] [--json]")
+	fmt.Fprintln(stream, "  council ask --stdin --team <name> [--config path] [--max-time duration] [--json]")
 }
 
 func printShowUsage(stream *os.File) {
@@ -241,6 +253,7 @@ func printShowUsage(stream *os.File) {
 
 type askArgs struct {
 	configPath string
+	maxTime    time.Duration
 	teamName   string
 	prompt     string
 	promptFile string
@@ -266,6 +279,23 @@ func parseAskArgs(args []string) (*askArgs, error) {
 			parsed.configPath = args[index]
 		case strings.HasPrefix(arg, "--config="):
 			parsed.configPath = strings.TrimPrefix(arg, "--config=")
+		case arg == "--max-time":
+			index++
+			if index >= len(args) {
+				return nil, fmt.Errorf("--max-time requires a value")
+			}
+
+			maxTime, err := parseMaxTime(args[index])
+			if err != nil {
+				return nil, err
+			}
+			parsed.maxTime = maxTime
+		case strings.HasPrefix(arg, "--max-time="):
+			maxTime, err := parseMaxTime(strings.TrimPrefix(arg, "--max-time="))
+			if err != nil {
+				return nil, err
+			}
+			parsed.maxTime = maxTime
 		case arg == "--prompt-file":
 			index++
 			if index >= len(args) {
@@ -356,6 +386,19 @@ func writeJSON(value any) int {
 
 	fmt.Println(string(data))
 	return 0
+}
+
+func parseMaxTime(value string) (time.Duration, error) {
+	maxTime, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, fmt.Errorf("invalid --max-time %q: %w", value, err)
+	}
+
+	if maxTime <= 0 {
+		return 0, fmt.Errorf("--max-time must be greater than 0")
+	}
+
+	return maxTime, nil
 }
 
 func printRunEvent(event run.Event) {

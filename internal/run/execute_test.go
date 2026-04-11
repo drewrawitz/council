@@ -2,9 +2,11 @@ package run
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"council/internal/model"
 	"council/internal/storage"
@@ -145,5 +147,92 @@ func TestExecutePersistsFailedRunWhenAgentInvocationFails(t *testing.T) {
 
 	if loaded.Error != record.Error {
 		t.Fatalf("loaded Error = %q, want %q", loaded.Error, record.Error)
+	}
+}
+
+func TestExecutePersistsFailedRunWhenContextTimesOut(t *testing.T) {
+	t.Parallel()
+
+	cfg := &model.Config{
+		Version: model.ConfigVersion,
+		Providers: map[string]model.ProviderConfig{
+			"slow": {
+				Type:    model.ProviderTypeSubprocess,
+				Command: "/bin/sh",
+				Args:    []string{"-c", "sleep 2; printf delayed"},
+			},
+		},
+		Agents: map[string]model.AgentConfig{
+			"slow-agent": {
+				Provider:     "slow",
+				Model:        "fake-model",
+				Role:         "analyst",
+				SystemPrompt: "Try to answer the task.",
+			},
+		},
+		Teams: map[string]model.TeamConfig{
+			"default": {
+				Members:     []string{"slow-agent"},
+				Synthesizer: "slow-agent",
+				Protocol:    "single-round",
+			},
+		},
+		Protocols: map[string]model.ProtocolConfig{
+			"single-round": {Kind: model.ProtocolKindSingleRound},
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	repo := storage.NewRepository(filepath.Join(t.TempDir(), "runs"))
+	record, err := Execute(ctx, repo, cfg, "default", "Review this plan", nil)
+	if err == nil {
+		t.Fatal("Execute returned nil error for timed out run")
+	}
+
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error = %v, want context deadline exceeded", err)
+	}
+
+	if record == nil {
+		t.Fatal("Execute returned nil record for timed out run")
+	}
+
+	if record.Status != "failed" {
+		t.Fatalf("Status = %q, want failed", record.Status)
+	}
+
+	if record.CompletedAt == nil {
+		t.Fatal("CompletedAt is nil, want failure timestamp")
+	}
+
+	if !strings.Contains(record.Error, "run timed out") {
+		t.Fatalf("run error %q did not mention timeout", record.Error)
+	}
+
+	if len(record.AgentOutputs) != 1 {
+		t.Fatalf("len(AgentOutputs) = %d, want 1", len(record.AgentOutputs))
+	}
+
+	if record.AgentOutputs[0].Status != "failed" {
+		t.Fatalf("AgentOutputs[0].Status = %q, want failed", record.AgentOutputs[0].Status)
+	}
+
+	if !strings.Contains(record.AgentOutputs[0].Error, "run timed out") {
+		t.Fatalf("AgentOutputs[0].Error = %q, want timeout error", record.AgentOutputs[0].Error)
+	}
+
+	loaded, loadErr := repo.Load(record.ID)
+	if loadErr != nil {
+		t.Fatalf("Load returned error: %v", loadErr)
+	}
+
+	if loaded.Status != "failed" {
+		t.Fatalf("loaded Status = %q, want failed", loaded.Status)
+	}
+
+	if !strings.Contains(loaded.Error, "run timed out") {
+		t.Fatalf("loaded Error = %q, want timeout error", loaded.Error)
 	}
 }
