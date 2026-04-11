@@ -16,7 +16,7 @@ func TestExecutePersistsCompletedRunWithMockProvider(t *testing.T) {
 	t.Parallel()
 
 	repo := storage.NewRepository(filepath.Join(t.TempDir(), "runs"))
-	record, err := Execute(context.Background(), repo, validConfig(), "default", "Review this plan", 1, nil)
+	record, err := Execute(context.Background(), repo, validConfig(), "default", "Review this plan", nil, 1, nil)
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
@@ -87,11 +87,54 @@ func TestExecutePersistsCompletedRunWithMockProvider(t *testing.T) {
 	}
 }
 
+func TestExecutePersistsArtifactsAndInjectsThemIntoPrompts(t *testing.T) {
+	t.Parallel()
+
+	repo := storage.NewRepository(filepath.Join(t.TempDir(), "runs"))
+	artifacts := []model.Artifact{{
+		Path:        "/tmp/brief.md",
+		SHA256:      "abc123",
+		Size:        14,
+		ContentType: "text/markdown; charset=utf-8",
+		Content:     "Artifact body",
+	}}
+
+	record, err := Execute(context.Background(), repo, validConfig(), "default", "Review this plan", artifacts, 1, nil)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+
+	if len(record.Artifacts) != 1 {
+		t.Fatalf("len(Artifacts) = %d, want 1", len(record.Artifacts))
+	}
+
+	if record.Artifacts[0].Path != "/tmp/brief.md" {
+		t.Fatalf("artifact path = %q, want /tmp/brief.md", record.Artifacts[0].Path)
+	}
+
+	if !strings.Contains(record.FinalAnswer, "Attached local artifacts:") {
+		t.Fatalf("FinalAnswer %q did not include artifact section", record.FinalAnswer)
+	}
+
+	if !strings.Contains(record.FinalAnswer, "Artifact body") {
+		t.Fatalf("FinalAnswer %q did not include artifact content", record.FinalAnswer)
+	}
+
+	loaded, loadErr := repo.Load(record.ID)
+	if loadErr != nil {
+		t.Fatalf("Load returned error: %v", loadErr)
+	}
+
+	if len(loaded.Artifacts) != 1 {
+		t.Fatalf("len(loaded.Artifacts) = %d, want 1", len(loaded.Artifacts))
+	}
+}
+
 func TestExecuteRunsCritiqueReviseRoundWhenMaxRoundsIsTwo(t *testing.T) {
 	t.Parallel()
 
 	repo := storage.NewRepository(filepath.Join(t.TempDir(), "runs"))
-	record, err := Execute(context.Background(), repo, validConfig(), "default", "Review this plan", 2, nil)
+	record, err := Execute(context.Background(), repo, validConfig(), "default", "Review this plan", nil, 2, nil)
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
@@ -137,7 +180,7 @@ func TestExecuteStopsEarlyWhenItemsConvergeBeforeHardCap(t *testing.T) {
 	t.Parallel()
 
 	repo := storage.NewRepository(filepath.Join(t.TempDir(), "runs"))
-	record, err := Execute(context.Background(), repo, validConfig(), "default", "Review this plan", 3, nil)
+	record, err := Execute(context.Background(), repo, validConfig(), "default", "Review this plan", nil, 3, nil)
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
@@ -208,7 +251,7 @@ func TestExecutePersistsFailedRunWhenAgentInvocationFails(t *testing.T) {
 	}
 
 	repo := storage.NewRepository(filepath.Join(t.TempDir(), "runs"))
-	record, err := Execute(context.Background(), repo, cfg, "default", "Review this plan", 1, nil)
+	record, err := Execute(context.Background(), repo, cfg, "default", "Review this plan", nil, 1, nil)
 	if err == nil {
 		t.Fatal("Execute returned nil error for broken subprocess provider")
 	}
@@ -299,7 +342,7 @@ func TestExecutePersistsFailedRunWhenContextTimesOut(t *testing.T) {
 	defer cancel()
 
 	repo := storage.NewRepository(filepath.Join(t.TempDir(), "runs"))
-	record, err := Execute(ctx, repo, cfg, "default", "Review this plan", 1, nil)
+	record, err := Execute(ctx, repo, cfg, "default", "Review this plan", nil, 1, nil)
 	if err == nil {
 		t.Fatal("Execute returned nil error for timed out run")
 	}

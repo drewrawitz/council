@@ -68,6 +68,11 @@ func runAsk(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+	artifacts, err := loadArtifacts(parsed)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 
 	executionContext := context.Background()
 	cancel := func() {}
@@ -76,7 +81,7 @@ func runAsk(args []string) int {
 	}
 	defer cancel()
 
-	record, err := run.Execute(executionContext, repo, loaded.Config, parsed.teamName, prompt, parsed.maxRounds, printRunEvent)
+	record, err := run.Execute(executionContext, repo, loaded.Config, parsed.teamName, prompt, artifacts, parsed.maxRounds, printRunEvent)
 	if err != nil {
 		if parsed.maxTime > 0 && errors.Is(err, context.DeadlineExceeded) {
 			err = fmt.Errorf("run exceeded max time %s: %w", parsed.maxTime, err)
@@ -211,6 +216,9 @@ func runShow(args []string) int {
 	fmt.Printf("status: %s\n", record.Status)
 	fmt.Printf("team: %s\n", record.Team)
 	fmt.Printf("protocol: %s\n", record.Protocol)
+	if len(record.Artifacts) > 0 {
+		fmt.Printf("artifacts: %d\n", len(record.Artifacts))
+	}
 	fmt.Printf("rounds: %d/%d\n", record.CompletedRounds, record.MaxRounds)
 	if record.StopReason != "" {
 		fmt.Printf("stop reason: %s\n", record.StopReason)
@@ -232,9 +240,9 @@ func printRootUsage(stream *os.File) {
 	fmt.Fprintln(stream, "Council is a local CLI-first multi-agent deliberation engine.")
 	fmt.Fprintln(stream)
 	fmt.Fprintln(stream, "Usage:")
-	fmt.Fprintln(stream, "  council ask \"prompt\" --team <name> [--config path] [--max-time duration] [--max-rounds n] [--json]")
-	fmt.Fprintln(stream, "  council ask --prompt-file <path> --team <name> [--config path] [--max-time duration] [--max-rounds n] [--json]")
-	fmt.Fprintln(stream, "  council ask --stdin --team <name> [--config path] [--max-time duration] [--max-rounds n] [--json]")
+	fmt.Fprintln(stream, "  council ask \"prompt\" --team <name> [--file path]... [--config path] [--max-time duration] [--max-rounds n] [--json]")
+	fmt.Fprintln(stream, "  council ask --prompt-file <path> --team <name> [--file path]... [--config path] [--max-time duration] [--max-rounds n] [--json]")
+	fmt.Fprintln(stream, "  council ask --stdin --team <name> [--file path]... [--config path] [--max-time duration] [--max-rounds n] [--json]")
 	fmt.Fprintln(stream, "  council config validate [--config path]")
 	fmt.Fprintln(stream, "  council plan --team <name> [--config path]")
 	fmt.Fprintln(stream, "  council show <run-id> [--json]")
@@ -247,9 +255,9 @@ func printConfigUsage(stream *os.File) {
 
 func printAskUsage(stream *os.File) {
 	fmt.Fprintln(stream, "Usage:")
-	fmt.Fprintln(stream, "  council ask \"prompt\" --team <name> [--config path] [--max-time duration] [--max-rounds n] [--json]")
-	fmt.Fprintln(stream, "  council ask --prompt-file <path> --team <name> [--config path] [--max-time duration] [--max-rounds n] [--json]")
-	fmt.Fprintln(stream, "  council ask --stdin --team <name> [--config path] [--max-time duration] [--max-rounds n] [--json]")
+	fmt.Fprintln(stream, "  council ask \"prompt\" --team <name> [--file path]... [--config path] [--max-time duration] [--max-rounds n] [--json]")
+	fmt.Fprintln(stream, "  council ask --prompt-file <path> --team <name> [--file path]... [--config path] [--max-time duration] [--max-rounds n] [--json]")
+	fmt.Fprintln(stream, "  council ask --stdin --team <name> [--file path]... [--config path] [--max-time duration] [--max-rounds n] [--json]")
 }
 
 func printShowUsage(stream *os.File) {
@@ -262,6 +270,7 @@ type askArgs struct {
 	maxTime    time.Duration
 	maxRounds  int
 	teamName   string
+	filePaths  []string
 	prompt     string
 	promptFile string
 	readStdin  bool
@@ -320,6 +329,14 @@ func parseAskArgs(args []string) (*askArgs, error) {
 				return nil, err
 			}
 			parsed.maxRounds = maxRounds
+		case arg == "--file":
+			index++
+			if index >= len(args) {
+				return nil, fmt.Errorf("--file requires a value")
+			}
+			parsed.filePaths = append(parsed.filePaths, args[index])
+		case strings.HasPrefix(arg, "--file="):
+			parsed.filePaths = append(parsed.filePaths, strings.TrimPrefix(arg, "--file="))
 		case arg == "--prompt-file":
 			index++
 			if index >= len(args) {

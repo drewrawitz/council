@@ -11,6 +11,7 @@ type RunRecord struct {
 	CompletedRounds int            `json:"completed_rounds"`
 	StopReason      string         `json:"stop_reason,omitempty"`
 	Prompt          string         `json:"prompt"`
+	Artifacts       []Artifact     `json:"artifacts,omitempty"`
 	StartedAt       time.Time      `json:"started_at"`
 	CompletedAt     *time.Time     `json:"completed_at,omitempty"`
 	AgentOutputs    []AgentOutput  `json:"agent_outputs,omitempty"`
@@ -46,6 +47,15 @@ type RoundSummary struct {
 	Round     int    `json:"round"`
 	ItemCount int    `json:"item_count"`
 	ItemHash  string `json:"item_hash"`
+}
+
+type Artifact struct {
+	Path        string `json:"path"`
+	SHA256      string `json:"sha256"`
+	Size        int64  `json:"size"`
+	ContentType string `json:"content_type"`
+	Content     string `json:"content"`
+	Truncated   bool   `json:"truncated,omitempty"`
 }
 
 type AgentOutput struct {

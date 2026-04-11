@@ -138,11 +138,10 @@ func classifyCandidate(candidate string) (string, string, bool) {
 	}
 }
 
-func buildSynthesisPrompt(prompt string, outputs []model.AgentOutput, items []model.Item) string {
+func buildSynthesisPrompt(prompt string, artifacts []model.Artifact, outputs []model.AgentOutput, items []model.Item) string {
 	var body strings.Builder
 	body.WriteString("You are synthesizing multiple agent responses into one final answer.\n\n")
-	body.WriteString("Original task:\n")
-	body.WriteString(strings.TrimSpace(prompt))
+	body.WriteString(buildTaskContext(prompt, artifacts))
 	body.WriteString("\n\n")
 
 	if len(items) > 0 {
@@ -188,6 +187,7 @@ func buildSynthesisPrompt(prompt string, outputs []model.AgentOutput, items []mo
 
 func buildRoundPrompt(
 	originalPrompt string,
+	artifacts []model.Artifact,
 	round int,
 	agentName string,
 	previousOutput *model.AgentOutput,
@@ -195,15 +195,14 @@ func buildRoundPrompt(
 	teamSize int,
 ) string {
 	if round == 0 {
-		return originalPrompt
+		return buildTaskContext(originalPrompt, artifacts)
 	}
 
 	var body strings.Builder
 	body.WriteString("Critique/revise round ")
 	body.WriteString(fmt.Sprintf("%d", round+1))
 	body.WriteString(".\n\n")
-	body.WriteString("Original task:\n")
-	body.WriteString(strings.TrimSpace(originalPrompt))
+	body.WriteString(buildTaskContext(originalPrompt, artifacts))
 	body.WriteString("\n\n")
 
 	if previousOutput != nil && strings.TrimSpace(previousOutput.Content) != "" {
@@ -244,6 +243,43 @@ func buildRoundPrompt(
 	body.WriteString("3. Return one revised Markdown answer, not a transcript of the protocol.\n")
 
 	return body.String()
+}
+
+func buildTaskContext(prompt string, artifacts []model.Artifact) string {
+	var body strings.Builder
+	body.WriteString("Original task:\n")
+	body.WriteString(strings.TrimSpace(prompt))
+
+	if len(artifacts) == 0 {
+		return body.String()
+	}
+
+	body.WriteString("\n\nAttached local artifacts:\n")
+	for _, artifact := range artifacts {
+		body.WriteString("\n## ")
+		body.WriteString(artifact.Path)
+		body.WriteString("\n")
+		body.WriteString("content type: ")
+		body.WriteString(artifact.ContentType)
+		body.WriteString("\n")
+		body.WriteString("size: ")
+		body.WriteString(fmt.Sprintf("%d", artifact.Size))
+		body.WriteString(" bytes\n")
+		body.WriteString("sha256: ")
+		body.WriteString(artifact.SHA256)
+		body.WriteString("\n")
+		if artifact.Truncated {
+			body.WriteString("content truncated: true\n")
+		}
+		body.WriteString("```text\n")
+		body.WriteString(artifact.Content)
+		if !strings.HasSuffix(artifact.Content, "\n") {
+			body.WriteString("\n")
+		}
+		body.WriteString("```\n")
+	}
+
+	return strings.TrimRight(body.String(), "\n")
 }
 
 func filterItemsByType(items []model.Item, itemType string) []model.Item {
@@ -391,12 +427,18 @@ func shouldSkipCandidate(value string) bool {
 		"system instructions:",
 		"user task:",
 		"original task:",
+		"attached local artifacts:",
 		"agent responses:",
 		"tokens used",
 		"your previous answer:",
 		"shared normalized items from the prior round:",
 		"focus items for critique:",
 		"instructions:",
+		"content type:",
+		"charset=",
+		"size:",
+		"sha256:",
+		"content truncated:",
 	} {
 		if lower == prefix || strings.HasPrefix(lower, prefix) {
 			return true

@@ -40,7 +40,7 @@ type Event struct {
 
 type Observer func(Event)
 
-func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, teamName string, prompt string, maxRounds int, observer Observer) (*model.RunRecord, error) {
+func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, teamName string, prompt string, artifacts []model.Artifact, maxRounds int, observer Observer) (*model.RunRecord, error) {
 	if maxRounds <= 0 {
 		maxRounds = 1
 	}
@@ -57,6 +57,7 @@ func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, t
 		Status:    "running",
 		MaxRounds: maxRounds,
 		Prompt:    prompt,
+		Artifacts: append([]model.Artifact(nil), artifacts...),
 		StartedAt: time.Now().UTC(),
 	}
 
@@ -73,7 +74,7 @@ func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, t
 
 	var latestOutputs []model.AgentOutput
 	for round := 0; round < maxRounds; round++ {
-		latestOutputs, err = executeRound(ctx, repo, runRecord, cfg, teamName, prompt, round, latestOutputs, runRecord.Items, providerSet, observer)
+		latestOutputs, err = executeRound(ctx, repo, runRecord, cfg, teamName, prompt, runRecord.Artifacts, round, latestOutputs, runRecord.Items, providerSet, observer)
 		if err != nil {
 			return failRun(repo, runRecord, err)
 		}
@@ -134,7 +135,7 @@ func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, t
 		AgentName:    plan.Synthesizer,
 		Model:        synthesizer.Model,
 		SystemPrompt: synthesizer.SystemPrompt,
-		UserPrompt:   buildSynthesisPrompt(prompt, latestOutputs, runRecord.Items),
+		UserPrompt:   buildSynthesisPrompt(prompt, runRecord.Artifacts, latestOutputs, runRecord.Items),
 		Settings:     synthesizer.Settings,
 	})
 	err = normalizeProviderError(ctx, err)
@@ -195,6 +196,7 @@ func executeRound(
 	cfg *model.Config,
 	teamName string,
 	originalPrompt string,
+	artifacts []model.Artifact,
 	round int,
 	previousOutputs []model.AgentOutput,
 	items []model.Item,
@@ -232,7 +234,7 @@ func executeRound(
 
 			agent := cfg.Agents[memberName]
 			outputIndex := startIndex + index
-			userPrompt := buildRoundPrompt(originalPrompt, round, memberName, findAgentOutput(previousOutputs, memberName), items, len(team.Members))
+			userPrompt := buildRoundPrompt(originalPrompt, artifacts, round, memberName, findAgentOutput(previousOutputs, memberName), items, len(team.Members))
 
 			notify(observer, Event{
 				Type:      EventAgentStarted,

@@ -72,6 +72,7 @@ func TestBuildSynthesisPromptPrefersNormalizedItemsWithRawFallback(t *testing.T)
 
 	prompt := buildSynthesisPrompt(
 		"Review this plan",
+		nil,
 		[]model.AgentOutput{{AgentName: "analyst", Content: "Raw output"}},
 		[]model.Item{{
 			ID:           "item-001",
@@ -104,6 +105,7 @@ func TestBuildRoundPromptUsesNormalizedItemsWithoutOtherRawOutputs(t *testing.T)
 
 	prompt := buildRoundPrompt(
 		"Review this plan",
+		nil,
 		1,
 		"analyst",
 		&model.AgentOutput{AgentName: "analyst", Content: "My previous answer"},
@@ -137,6 +139,35 @@ func TestBuildRoundPromptUsesNormalizedItemsWithoutOtherRawOutputs(t *testing.T)
 
 	if strings.Contains(prompt, "Raw agent outputs") {
 		t.Fatalf("prompt %q should not include raw agent outputs", prompt)
+	}
+}
+
+func TestBuildTaskContextIncludesArtifactMetadataAndContent(t *testing.T) {
+	t.Parallel()
+
+	context := buildTaskContext("Review this plan", []model.Artifact{{
+		Path:        "/tmp/brief.md",
+		SHA256:      "abc123",
+		Size:        17,
+		ContentType: "text/markdown; charset=utf-8",
+		Content:     "Artifact contents",
+		Truncated:   true,
+	}})
+
+	if !strings.Contains(context, "Attached local artifacts:") {
+		t.Fatalf("context %q did not include artifact section", context)
+	}
+
+	if !strings.Contains(context, "/tmp/brief.md") {
+		t.Fatalf("context %q did not include artifact path", context)
+	}
+
+	if !strings.Contains(context, "content truncated: true") {
+		t.Fatalf("context %q did not include truncation marker", context)
+	}
+
+	if !strings.Contains(context, "Artifact contents") {
+		t.Fatalf("context %q did not include artifact content", context)
 	}
 }
 
