@@ -27,6 +27,7 @@ const (
 type Event struct {
 	Type      EventType
 	RunID     string
+	Round     int
 	AgentName string
 	Provider  string
 	Model     string
@@ -36,7 +37,11 @@ type Event struct {
 
 type Observer func(Event)
 
-func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, teamName string, prompt string, observer Observer) (*model.RunRecord, error) {
+func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, teamName string, prompt string, maxRounds int, observer Observer) (*model.RunRecord, error) {
+	if maxRounds <= 0 {
+		maxRounds = 1
+	}
+
 	plan, err := BuildPlan(cfg, teamName)
 	if err != nil {
 		return nil, err
@@ -47,26 +52,12 @@ func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, t
 		Team:      teamName,
 		Protocol:  plan.ProtocolName,
 		Status:    "running",
+		MaxRounds: maxRounds,
 		Prompt:    prompt,
 		StartedAt: time.Now().UTC(),
 	}
 
 	notify(observer, Event{Type: EventRunStarted, RunID: runRecord.ID})
-
-	team := cfg.Teams[teamName]
-	runRecord.AgentOutputs = make([]model.AgentOutput, len(team.Members))
-	for index, memberName := range team.Members {
-		agent := cfg.Agents[memberName]
-		runRecord.AgentOutputs[index] = model.AgentOutput{
-			AgentName:     memberName,
-			Provider:      agent.Provider,
-			Model:         agent.Model,
-			Role:          agent.Role,
-			Status:        "pending",
-			Round:         0,
-			SequenceIndex: index,
-		}
-	}
 
 	if err := repo.Save(runRecord); err != nil {
 		return nil, err
@@ -77,107 +68,18 @@ func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, t
 		return failRun(repo, runRecord, err)
 	}
 
-	outputs := runRecord.AgentOutputs
-	var mu sync.Mutex
+	var latestOutputs []model.AgentOutput
+	for round := 0; round < maxRounds; round++ {
+		latestOutputs, err = executeRound(ctx, repo, runRecord, cfg, teamName, prompt, round, latestOutputs, runRecord.Items, providerSet, observer)
+		if err != nil {
+			return failRun(repo, runRecord, err)
+		}
 
-	var wg sync.WaitGroup
-	for index, memberName := range team.Members {
-		wg.Add(1)
-
-		go func(index int, memberName string) {
-			defer wg.Done()
-
-			agent := cfg.Agents[memberName]
-			notify(observer, Event{
-				Type:      EventAgentStarted,
-				RunID:     runRecord.ID,
-				AgentName: memberName,
-				Provider:  agent.Provider,
-				Model:     agent.Model,
-			})
-
-			mu.Lock()
-			outputs[index].Status = "running"
-			runRecord.AgentOutputs = outputs
-			_ = repo.Save(runRecord)
-			mu.Unlock()
-
-			start := time.Now()
-			result, err := providerSet[agent.Provider].Generate(ctx, providers.GenerateRequest{
-				RunID:        runRecord.ID,
-				AgentName:    memberName,
-				Model:        agent.Model,
-				SystemPrompt: agent.SystemPrompt,
-				UserPrompt:   prompt,
-				Settings:     agent.Settings,
-			})
-			err = normalizeProviderError(ctx, err)
-
-			outputs[index] = model.AgentOutput{
-				AgentName:     memberName,
-				Provider:      agent.Provider,
-				Model:         agent.Model,
-				Role:          agent.Role,
-				Status:        "completed",
-				Content:       result.Content,
-				RawStdout:     result.RawStdout,
-				RawStderr:     result.RawStderr,
-				FinishReason:  result.FinishReason,
-				PromptTokens:  result.PromptTokens,
-				OutputTokens:  result.OutputTokens,
-				DurationMs:    time.Since(start).Milliseconds(),
-				Round:         0,
-				SequenceIndex: index,
-			}
-
-			if err != nil {
-				outputs[index].Error = err.Error()
-				outputs[index].Status = "failed"
-			}
-
-			mu.Lock()
-			runRecord.AgentOutputs = outputs
-			_ = repo.Save(runRecord)
-			mu.Unlock()
-
-			if err != nil {
-				notify(observer, Event{
-					Type:      EventAgentFailed,
-					RunID:     runRecord.ID,
-					AgentName: memberName,
-					Provider:  agent.Provider,
-					Model:     agent.Model,
-					Duration:  time.Since(start),
-					Err:       err,
-				})
-				return
-			}
-
-			notify(observer, Event{
-				Type:      EventAgentCompleted,
-				RunID:     runRecord.ID,
-				AgentName: memberName,
-				Provider:  agent.Provider,
-				Model:     agent.Model,
-				Duration:  time.Since(start),
-			})
-		}(index, memberName)
-	}
-
-	wg.Wait()
-	runRecord.AgentOutputs = outputs
-
-	if err := repo.Save(runRecord); err != nil {
-		return nil, err
-	}
-
-	if err := executionContextError(ctx); err != nil {
-		return failRun(repo, runRecord, err)
-	}
-
-	memberErrors := collectOutputErrors(outputs)
-	if len(memberErrors) > 0 {
-		return failRun(repo, runRecord, fmt.Errorf("agent round failed:\n- %s", strings.Join(memberErrors, "\n- ")))
+		runRecord.CompletedRounds = round + 1
+		runRecord.Items = ExtractItems(latestOutputs)
+		if err := repo.Save(runRecord); err != nil {
+			return nil, err
+		}
 	}
 
 	synthesizer := cfg.Agents[plan.Synthesizer]
@@ -194,14 +96,9 @@ func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, t
 		Model:         synthesizer.Model,
 		Role:          synthesizer.Role,
 		Status:        "running",
-		Round:         1,
-		SequenceIndex: len(outputs),
+		Round:         maxRounds,
+		SequenceIndex: len(latestOutputs),
 	}
-	if err := repo.Save(runRecord); err != nil {
-		return nil, err
-	}
-
-	runRecord.Items = ExtractItems(outputs)
 	if err := repo.Save(runRecord); err != nil {
 		return nil, err
 	}
@@ -212,7 +109,7 @@ func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, t
 		AgentName:    plan.Synthesizer,
 		Model:        synthesizer.Model,
 		SystemPrompt: synthesizer.SystemPrompt,
-		UserPrompt:   buildSynthesisPrompt(prompt, outputs, runRecord.Items),
+		UserPrompt:   buildSynthesisPrompt(prompt, latestOutputs, runRecord.Items),
 		Settings:     synthesizer.Settings,
 	})
 	err = normalizeProviderError(ctx, err)
@@ -230,8 +127,8 @@ func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, t
 		PromptTokens:  synthesisResult.PromptTokens,
 		OutputTokens:  synthesisResult.OutputTokens,
 		DurationMs:    time.Since(synthesisStart).Milliseconds(),
-		Round:         1,
-		SequenceIndex: len(outputs),
+		Round:         maxRounds,
+		SequenceIndex: len(latestOutputs),
 	}
 
 	if err != nil {
@@ -263,6 +160,144 @@ func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, t
 	}
 
 	return runRecord, nil
+}
+
+func executeRound(
+	ctx context.Context,
+	repo *storage.Repository,
+	runRecord *model.RunRecord,
+	cfg *model.Config,
+	teamName string,
+	originalPrompt string,
+	round int,
+	previousOutputs []model.AgentOutput,
+	items []model.Item,
+	providerSet map[string]providers.Provider,
+	observer Observer,
+) ([]model.AgentOutput, error) {
+	team := cfg.Teams[teamName]
+	startIndex := len(runRecord.AgentOutputs)
+	roundOutputs := make([]model.AgentOutput, len(team.Members))
+	for index, memberName := range team.Members {
+		agent := cfg.Agents[memberName]
+		roundOutputs[index] = model.AgentOutput{
+			AgentName:     memberName,
+			Provider:      agent.Provider,
+			Model:         agent.Model,
+			Role:          agent.Role,
+			Status:        "pending",
+			Round:         round,
+			SequenceIndex: index,
+		}
+	}
+
+	runRecord.AgentOutputs = append(runRecord.AgentOutputs, roundOutputs...)
+	if err := repo.Save(runRecord); err != nil {
+		return nil, err
+	}
+
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for index, memberName := range team.Members {
+		wg.Add(1)
+
+		go func(index int, memberName string) {
+			defer wg.Done()
+
+			agent := cfg.Agents[memberName]
+			outputIndex := startIndex + index
+			userPrompt := buildRoundPrompt(originalPrompt, round, memberName, findAgentOutput(previousOutputs, memberName), items, len(team.Members))
+
+			notify(observer, Event{
+				Type:      EventAgentStarted,
+				RunID:     runRecord.ID,
+				Round:     round,
+				AgentName: memberName,
+				Provider:  agent.Provider,
+				Model:     agent.Model,
+			})
+
+			mu.Lock()
+			runRecord.AgentOutputs[outputIndex].Status = "running"
+			_ = repo.Save(runRecord)
+			mu.Unlock()
+
+			start := time.Now()
+			result, err := providerSet[agent.Provider].Generate(ctx, providers.GenerateRequest{
+				RunID:        runRecord.ID,
+				AgentName:    memberName,
+				Model:        agent.Model,
+				SystemPrompt: agent.SystemPrompt,
+				UserPrompt:   userPrompt,
+				Settings:     agent.Settings,
+			})
+			err = normalizeProviderError(ctx, err)
+
+			output := model.AgentOutput{
+				AgentName:     memberName,
+				Provider:      agent.Provider,
+				Model:         agent.Model,
+				Role:          agent.Role,
+				Status:        "completed",
+				Content:       result.Content,
+				RawStdout:     result.RawStdout,
+				RawStderr:     result.RawStderr,
+				FinishReason:  result.FinishReason,
+				PromptTokens:  result.PromptTokens,
+				OutputTokens:  result.OutputTokens,
+				DurationMs:    time.Since(start).Milliseconds(),
+				Round:         round,
+				SequenceIndex: index,
+			}
+
+			if err != nil {
+				output.Error = err.Error()
+				output.Status = "failed"
+			}
+
+			mu.Lock()
+			runRecord.AgentOutputs[outputIndex] = output
+			_ = repo.Save(runRecord)
+			mu.Unlock()
+
+			if err != nil {
+				notify(observer, Event{
+					Type:      EventAgentFailed,
+					RunID:     runRecord.ID,
+					Round:     round,
+					AgentName: memberName,
+					Provider:  agent.Provider,
+					Model:     agent.Model,
+					Duration:  time.Since(start),
+					Err:       err,
+				})
+				return
+			}
+
+			notify(observer, Event{
+				Type:      EventAgentCompleted,
+				RunID:     runRecord.ID,
+				Round:     round,
+				AgentName: memberName,
+				Provider:  agent.Provider,
+				Model:     agent.Model,
+				Duration:  time.Since(start),
+			})
+		}(index, memberName)
+	}
+
+	wg.Wait()
+
+	if err := executionContextError(ctx); err != nil {
+		return nil, err
+	}
+
+	completedRoundOutputs := append([]model.AgentOutput(nil), runRecord.AgentOutputs[startIndex:startIndex+len(team.Members)]...)
+	if memberErrors := collectOutputErrors(completedRoundOutputs); len(memberErrors) > 0 {
+		return nil, fmt.Errorf("agent round %d failed:\n- %s", round+1, strings.Join(memberErrors, "\n- "))
+	}
+
+	return completedRoundOutputs, nil
 }
 
 func instantiateProviders(cfg *model.Config) (map[string]providers.Provider, error) {

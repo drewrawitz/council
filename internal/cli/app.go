@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -75,7 +76,7 @@ func runAsk(args []string) int {
 	}
 	defer cancel()
 
-	record, err := run.Execute(executionContext, repo, loaded.Config, parsed.teamName, prompt, printRunEvent)
+	record, err := run.Execute(executionContext, repo, loaded.Config, parsed.teamName, prompt, parsed.maxRounds, printRunEvent)
 	if err != nil {
 		if parsed.maxTime > 0 && errors.Is(err, context.DeadlineExceeded) {
 			err = fmt.Errorf("run exceeded max time %s: %w", parsed.maxTime, err)
@@ -226,9 +227,9 @@ func printRootUsage(stream *os.File) {
 	fmt.Fprintln(stream, "Council is a local CLI-first multi-agent deliberation engine.")
 	fmt.Fprintln(stream)
 	fmt.Fprintln(stream, "Usage:")
-	fmt.Fprintln(stream, "  council ask \"prompt\" --team <name> [--config path] [--max-time duration] [--json]")
-	fmt.Fprintln(stream, "  council ask --prompt-file <path> --team <name> [--config path] [--max-time duration] [--json]")
-	fmt.Fprintln(stream, "  council ask --stdin --team <name> [--config path] [--max-time duration] [--json]")
+	fmt.Fprintln(stream, "  council ask \"prompt\" --team <name> [--config path] [--max-time duration] [--max-rounds n] [--json]")
+	fmt.Fprintln(stream, "  council ask --prompt-file <path> --team <name> [--config path] [--max-time duration] [--max-rounds n] [--json]")
+	fmt.Fprintln(stream, "  council ask --stdin --team <name> [--config path] [--max-time duration] [--max-rounds n] [--json]")
 	fmt.Fprintln(stream, "  council config validate [--config path]")
 	fmt.Fprintln(stream, "  council plan --team <name> [--config path]")
 	fmt.Fprintln(stream, "  council show <run-id> [--json]")
@@ -241,9 +242,9 @@ func printConfigUsage(stream *os.File) {
 
 func printAskUsage(stream *os.File) {
 	fmt.Fprintln(stream, "Usage:")
-	fmt.Fprintln(stream, "  council ask \"prompt\" --team <name> [--config path] [--max-time duration] [--json]")
-	fmt.Fprintln(stream, "  council ask --prompt-file <path> --team <name> [--config path] [--max-time duration] [--json]")
-	fmt.Fprintln(stream, "  council ask --stdin --team <name> [--config path] [--max-time duration] [--json]")
+	fmt.Fprintln(stream, "  council ask \"prompt\" --team <name> [--config path] [--max-time duration] [--max-rounds n] [--json]")
+	fmt.Fprintln(stream, "  council ask --prompt-file <path> --team <name> [--config path] [--max-time duration] [--max-rounds n] [--json]")
+	fmt.Fprintln(stream, "  council ask --stdin --team <name> [--config path] [--max-time duration] [--max-rounds n] [--json]")
 }
 
 func printShowUsage(stream *os.File) {
@@ -254,6 +255,7 @@ func printShowUsage(stream *os.File) {
 type askArgs struct {
 	configPath string
 	maxTime    time.Duration
+	maxRounds  int
 	teamName   string
 	prompt     string
 	promptFile string
@@ -262,7 +264,7 @@ type askArgs struct {
 }
 
 func parseAskArgs(args []string) (*askArgs, error) {
-	parsed := &askArgs{}
+	parsed := &askArgs{maxRounds: 1}
 	promptParts := make([]string, 0)
 
 	for index := 0; index < len(args); index++ {
@@ -296,6 +298,23 @@ func parseAskArgs(args []string) (*askArgs, error) {
 				return nil, err
 			}
 			parsed.maxTime = maxTime
+		case arg == "--max-rounds":
+			index++
+			if index >= len(args) {
+				return nil, fmt.Errorf("--max-rounds requires a value")
+			}
+
+			maxRounds, err := parseMaxRounds(args[index])
+			if err != nil {
+				return nil, err
+			}
+			parsed.maxRounds = maxRounds
+		case strings.HasPrefix(arg, "--max-rounds="):
+			maxRounds, err := parseMaxRounds(strings.TrimPrefix(arg, "--max-rounds="))
+			if err != nil {
+				return nil, err
+			}
+			parsed.maxRounds = maxRounds
 		case arg == "--prompt-file":
 			index++
 			if index >= len(args) {
@@ -401,16 +420,29 @@ func parseMaxTime(value string) (time.Duration, error) {
 	return maxTime, nil
 }
 
+func parseMaxRounds(value string) (int, error) {
+	maxRounds, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("invalid --max-rounds %q: %w", value, err)
+	}
+
+	if maxRounds <= 0 {
+		return 0, fmt.Errorf("--max-rounds must be greater than 0")
+	}
+
+	return maxRounds, nil
+}
+
 func printRunEvent(event run.Event) {
 	switch event.Type {
 	case run.EventRunStarted:
 		fmt.Fprintf(os.Stderr, "run id: %s\n", event.RunID)
 	case run.EventAgentStarted:
-		fmt.Fprintf(os.Stderr, "starting %s via %s (%s)\n", event.AgentName, event.Provider, event.Model)
+		fmt.Fprintf(os.Stderr, "starting round %d %s via %s (%s)\n", event.Round+1, event.AgentName, event.Provider, event.Model)
 	case run.EventAgentCompleted:
-		fmt.Fprintf(os.Stderr, "completed %s in %s\n", event.AgentName, formatDuration(event.Duration))
+		fmt.Fprintf(os.Stderr, "completed round %d %s in %s\n", event.Round+1, event.AgentName, formatDuration(event.Duration))
 	case run.EventAgentFailed:
-		fmt.Fprintf(os.Stderr, "failed %s after %s: %v\n", event.AgentName, formatDuration(event.Duration), event.Err)
+		fmt.Fprintf(os.Stderr, "failed round %d %s after %s: %v\n", event.Round+1, event.AgentName, formatDuration(event.Duration), event.Err)
 	case run.EventSynthesisStarted:
 		fmt.Fprintf(os.Stderr, "starting synthesis via %s (%s)\n", event.AgentName, event.Model)
 	case run.EventSynthesisComplete:

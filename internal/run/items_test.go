@@ -98,3 +98,86 @@ func TestBuildSynthesisPromptPrefersNormalizedItemsWithRawFallback(t *testing.T)
 		t.Fatalf("prompt %q did not include raw fallback section", prompt)
 	}
 }
+
+func TestBuildRoundPromptUsesNormalizedItemsWithoutOtherRawOutputs(t *testing.T) {
+	t.Parallel()
+
+	prompt := buildRoundPrompt(
+		"Review this plan",
+		1,
+		"analyst",
+		&model.AgentOutput{AgentName: "analyst", Content: "My previous answer"},
+		[]model.Item{
+			{
+				ID:           "item-001",
+				Type:         model.ItemTypeQuestion,
+				Content:      "what should happen on partial failure?",
+				SourceAgents: []string{"skeptic"},
+				Status:       model.ItemStatusOpen,
+			},
+		},
+		2,
+	)
+
+	if !strings.Contains(prompt, "Critique/revise round 2") {
+		t.Fatalf("prompt %q did not include round header", prompt)
+	}
+
+	if !strings.Contains(prompt, "Shared normalized items from the prior round:") {
+		t.Fatalf("prompt %q did not include normalized items section", prompt)
+	}
+
+	if !strings.Contains(prompt, "Focus items for critique:") {
+		t.Fatalf("prompt %q did not include critique focus section", prompt)
+	}
+
+	if !strings.Contains(prompt, "Your previous answer:\nMy previous answer") {
+		t.Fatalf("prompt %q did not include own previous answer", prompt)
+	}
+
+	if strings.Contains(prompt, "Raw agent outputs") {
+		t.Fatalf("prompt %q should not include raw agent outputs", prompt)
+	}
+}
+
+func TestExtractItemsSkipsRoundProtocolScaffolding(t *testing.T) {
+	t.Parallel()
+
+	items := ExtractItems([]model.AgentOutput{{
+		AgentName: "analyst",
+		Content: strings.Join([]string{
+			"Critique/revise round 2.",
+			"Your previous answer:",
+			"Review this plan.",
+			"Instructions:",
+			"1. Critique weak assumptions, gaps, and edge cases relevant to your role.",
+			"2. Revise your answer using the normalized items above.",
+			"3. Return one revised Markdown answer, not a transcript of the protocol.",
+		}, "\n"),
+	}})
+
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1", len(items))
+	}
+
+	if items[0].Content != "Review this plan" {
+		t.Fatalf("item content = %q, want only the actual answer content", items[0].Content)
+	}
+}
+
+func TestExtractItemsStripsSourceAnnotationsFromFormattedItems(t *testing.T) {
+	t.Parallel()
+
+	items := ExtractItems([]model.AgentOutput{{
+		AgentName: "analyst",
+		Content:   "- Review this plan [sources: analyst, skeptic]",
+	}})
+
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1", len(items))
+	}
+
+	if items[0].Content != "Review this plan" {
+		t.Fatalf("item content = %q, want source suffix removed", items[0].Content)
+	}
+}

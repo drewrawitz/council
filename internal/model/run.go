@@ -3,18 +3,20 @@ package model
 import "time"
 
 type RunRecord struct {
-	ID           string        `json:"id"`
-	Team         string        `json:"team"`
-	Protocol     string        `json:"protocol"`
-	Status       string        `json:"status"`
-	Prompt       string        `json:"prompt"`
-	StartedAt    time.Time     `json:"started_at"`
-	CompletedAt  *time.Time    `json:"completed_at,omitempty"`
-	AgentOutputs []AgentOutput `json:"agent_outputs,omitempty"`
-	Items        []Item        `json:"items,omitempty"`
-	Synthesis    *AgentOutput  `json:"synthesis,omitempty"`
-	FinalAnswer  string        `json:"final_answer,omitempty"`
-	Error        string        `json:"error,omitempty"`
+	ID              string        `json:"id"`
+	Team            string        `json:"team"`
+	Protocol        string        `json:"protocol"`
+	Status          string        `json:"status"`
+	MaxRounds       int           `json:"max_rounds"`
+	CompletedRounds int           `json:"completed_rounds"`
+	Prompt          string        `json:"prompt"`
+	StartedAt       time.Time     `json:"started_at"`
+	CompletedAt     *time.Time    `json:"completed_at,omitempty"`
+	AgentOutputs    []AgentOutput `json:"agent_outputs,omitempty"`
+	Items           []Item        `json:"items,omitempty"`
+	Synthesis       *AgentOutput  `json:"synthesis,omitempty"`
+	FinalAnswer     string        `json:"final_answer,omitempty"`
+	Error           string        `json:"error,omitempty"`
 }
 
 const (

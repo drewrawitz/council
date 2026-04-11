@@ -84,3 +84,29 @@ func TestParseAskArgsRejectsInvalidMaxTime(t *testing.T) {
 		t.Fatalf("error = %q, want invalid max time message", err)
 	}
 }
+
+func TestParseAskArgsSupportsMaxRounds(t *testing.T) {
+	t.Parallel()
+
+	parsed, err := parseAskArgs([]string{"hello", "--team", "default", "--max-rounds", "2"})
+	if err != nil {
+		t.Fatalf("parseAskArgs returned error: %v", err)
+	}
+
+	if parsed.maxRounds != 2 {
+		t.Fatalf("maxRounds = %d, want 2", parsed.maxRounds)
+	}
+}
+
+func TestParseAskArgsRejectsInvalidMaxRounds(t *testing.T) {
+	t.Parallel()
+
+	_, err := parseAskArgs([]string{"hello", "--team", "default", "--max-rounds", "0"})
+	if err == nil {
+		t.Fatal("parseAskArgs returned nil error for invalid max rounds")
+	}
+
+	if err.Error() != "--max-rounds must be greater than 0" {
+		t.Fatalf("error = %q, want invalid max rounds message", err)
+	}
+}

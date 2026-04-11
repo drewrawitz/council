@@ -16,13 +16,17 @@ func TestExecutePersistsCompletedRunWithMockProvider(t *testing.T) {
 	t.Parallel()
 
 	repo := storage.NewRepository(filepath.Join(t.TempDir(), "runs"))
-	record, err := Execute(context.Background(), repo, validConfig(), "default", "Review this plan", nil)
+	record, err := Execute(context.Background(), repo, validConfig(), "default", "Review this plan", 1, nil)
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
 
 	if record.Status != "completed" {
 		t.Fatalf("Status = %q, want completed", record.Status)
+	}
+
+	if record.MaxRounds != 1 || record.CompletedRounds != 1 {
+		t.Fatalf("round metadata = %d/%d, want 1/1", record.CompletedRounds, record.MaxRounds)
 	}
 
 	if record.CompletedAt == nil {
@@ -75,6 +79,40 @@ func TestExecutePersistsCompletedRunWithMockProvider(t *testing.T) {
 	}
 }
 
+func TestExecuteRunsCritiqueReviseRoundWhenMaxRoundsIsTwo(t *testing.T) {
+	t.Parallel()
+
+	repo := storage.NewRepository(filepath.Join(t.TempDir(), "runs"))
+	record, err := Execute(context.Background(), repo, validConfig(), "default", "Review this plan", 2, nil)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+
+	if record.Status != "completed" {
+		t.Fatalf("Status = %q, want completed", record.Status)
+	}
+
+	if record.MaxRounds != 2 || record.CompletedRounds != 2 {
+		t.Fatalf("round metadata = %d/%d, want 2/2", record.CompletedRounds, record.MaxRounds)
+	}
+
+	if len(record.AgentOutputs) != 4 {
+		t.Fatalf("len(AgentOutputs) = %d, want 4", len(record.AgentOutputs))
+	}
+
+	if record.AgentOutputs[2].Round != 1 || record.AgentOutputs[3].Round != 1 {
+		t.Fatalf("second-round outputs have rounds %d and %d, want 1 and 1", record.AgentOutputs[2].Round, record.AgentOutputs[3].Round)
+	}
+
+	if !strings.Contains(record.AgentOutputs[2].Content, "Critique/revise round 2") {
+		t.Fatalf("round 2 content %q did not include critique/revise prompt", record.AgentOutputs[2].Content)
+	}
+
+	if record.Synthesis == nil || record.Synthesis.Round != 2 {
+		t.Fatalf("synthesis = %#v, want round 2 synthesis", record.Synthesis)
+	}
+}
+
 func TestExecutePersistsFailedRunWhenAgentInvocationFails(t *testing.T) {
 	t.Parallel()
 
@@ -107,7 +145,7 @@ func TestExecutePersistsFailedRunWhenAgentInvocationFails(t *testing.T) {
 	}
 
 	repo := storage.NewRepository(filepath.Join(t.TempDir(), "runs"))
-	record, err := Execute(context.Background(), repo, cfg, "default", "Review this plan", nil)
+	record, err := Execute(context.Background(), repo, cfg, "default", "Review this plan", 1, nil)
 	if err == nil {
 		t.Fatal("Execute returned nil error for broken subprocess provider")
 	}
@@ -140,7 +178,7 @@ func TestExecutePersistsFailedRunWhenAgentInvocationFails(t *testing.T) {
 		t.Fatalf("AgentOutputs[0].Status = %q, want failed", record.AgentOutputs[0].Status)
 	}
 
-	if !strings.Contains(record.Error, "agent round failed") {
+	if !strings.Contains(record.Error, "agent round 1 failed") {
 		t.Fatalf("run error %q did not mention failed agent round", record.Error)
 	}
 
@@ -194,7 +232,7 @@ func TestExecutePersistsFailedRunWhenContextTimesOut(t *testing.T) {
 	defer cancel()
 
 	repo := storage.NewRepository(filepath.Join(t.TempDir(), "runs"))
-	record, err := Execute(ctx, repo, cfg, "default", "Review this plan", nil)
+	record, err := Execute(ctx, repo, cfg, "default", "Review this plan", 1, nil)
 	if err == nil {
 		t.Fatal("Execute returned nil error for timed out run")
 	}

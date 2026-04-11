@@ -184,6 +184,66 @@ func buildSynthesisPrompt(prompt string, outputs []model.AgentOutput, items []mo
 	return body.String()
 }
 
+func buildRoundPrompt(
+	originalPrompt string,
+	round int,
+	agentName string,
+	previousOutput *model.AgentOutput,
+	items []model.Item,
+	teamSize int,
+) string {
+	if round == 0 {
+		return originalPrompt
+	}
+
+	var body strings.Builder
+	body.WriteString("Critique/revise round ")
+	body.WriteString(fmt.Sprintf("%d", round+1))
+	body.WriteString(".\n\n")
+	body.WriteString("Original task:\n")
+	body.WriteString(strings.TrimSpace(originalPrompt))
+	body.WriteString("\n\n")
+
+	if previousOutput != nil && strings.TrimSpace(previousOutput.Content) != "" {
+		body.WriteString("Your previous answer:\n")
+		body.WriteString(strings.TrimSpace(previousOutput.Content))
+		body.WriteString("\n\n")
+	}
+
+	if len(items) > 0 {
+		body.WriteString("Shared normalized items from the prior round:\n")
+		body.WriteString(formatItemGroups(items))
+		body.WriteString("\n")
+
+		focusItems := buildFocusItems(agentName, items, teamSize)
+		if len(focusItems) > 0 {
+			body.WriteString("Focus items for critique:\n")
+			for _, item := range focusItems {
+				body.WriteString("- [")
+				body.WriteString(item.Type)
+				body.WriteString("] ")
+				body.WriteString(item.Content)
+				if len(item.SourceAgents) > 0 {
+					body.WriteString(" [sources: ")
+					body.WriteString(strings.Join(item.SourceAgents, ", "))
+					body.WriteString("]")
+				}
+				body.WriteString("\n")
+			}
+			body.WriteString("\n")
+		}
+	} else {
+		body.WriteString("No normalized items were extracted from the prior round. Improve the answer directly.\n\n")
+	}
+
+	body.WriteString("Instructions:\n")
+	body.WriteString("1. Critique weak assumptions, gaps, and edge cases relevant to your role.\n")
+	body.WriteString("2. Revise your answer using the normalized items above.\n")
+	body.WriteString("3. Return one revised Markdown answer, not a transcript of the protocol.\n")
+
+	return body.String()
+}
+
 func filterItemsByType(items []model.Item, itemType string) []model.Item {
 	filtered := make([]model.Item, 0)
 	for _, item := range items {
@@ -208,6 +268,63 @@ func titleForItemType(itemType string) string {
 	default:
 		return "Items"
 	}
+}
+
+func buildFocusItems(agentName string, items []model.Item, teamSize int) []model.Item {
+	focusItems := make([]model.Item, 0)
+	for _, item := range items {
+		if item.Type == model.ItemTypeQuestion {
+			focusItems = append(focusItems, item)
+			continue
+		}
+
+		if !slices.Contains(item.SourceAgents, agentName) {
+			focusItems = append(focusItems, item)
+			continue
+		}
+
+		if teamSize > 0 && len(item.SourceAgents) < teamSize {
+			focusItems = append(focusItems, item)
+		}
+	}
+
+	return focusItems
+}
+
+func formatItemGroups(items []model.Item) string {
+	var body strings.Builder
+	for _, itemType := range itemTypeOrder {
+		typedItems := filterItemsByType(items, itemType)
+		if len(typedItems) == 0 {
+			continue
+		}
+
+		body.WriteString("\n## ")
+		body.WriteString(titleForItemType(itemType))
+		body.WriteString("\n")
+		for _, item := range typedItems {
+			body.WriteString("- ")
+			body.WriteString(item.Content)
+			if len(item.SourceAgents) > 0 {
+				body.WriteString(" [sources: ")
+				body.WriteString(strings.Join(item.SourceAgents, ", "))
+				body.WriteString("]")
+			}
+			body.WriteString("\n")
+		}
+	}
+
+	return strings.TrimLeft(body.String(), "\n")
+}
+
+func findAgentOutput(outputs []model.AgentOutput, agentName string) *model.AgentOutput {
+	for index := range outputs {
+		if outputs[index].AgentName == agentName {
+			return &outputs[index]
+		}
+	}
+
+	return nil
 }
 
 func stripListMarker(value string) string {
@@ -249,8 +366,29 @@ func shouldSkipCandidate(value string) bool {
 		return true
 	}
 
-	for _, prefix := range []string{"system instructions:", "user task:", "original task:", "agent responses:", "tokens used"} {
-		if lower == prefix {
+	for _, prefix := range []string{
+		"system instructions:",
+		"user task:",
+		"original task:",
+		"agent responses:",
+		"tokens used",
+		"your previous answer:",
+		"shared normalized items from the prior round:",
+		"focus items for critique:",
+		"instructions:",
+	} {
+		if lower == prefix || strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+
+	for _, marker := range []string{
+		"critique/revise round ",
+		"revise your answer using the normalized items above",
+		"return one revised markdown answer",
+		"critique weak assumptions, gaps, and edge cases relevant to your role",
+	} {
+		if strings.HasPrefix(lower, marker) {
 			return true
 		}
 	}
@@ -301,6 +439,7 @@ func trimLabelPrefix(value string, prefixes ...string) string {
 	}
 
 	trimmed = strings.TrimSpace(trimmed)
+	trimmed = stripSourceSuffix(trimmed)
 	trimmed = strings.TrimSuffix(trimmed, ";")
 	trimmed = strings.TrimSpace(trimmed)
 	if !strings.HasSuffix(trimmed, "?") {
@@ -308,6 +447,15 @@ func trimLabelPrefix(value string, prefixes ...string) string {
 	}
 
 	return cleanWhitespace(trimmed)
+}
+
+func stripSourceSuffix(value string) string {
+	marker := strings.Index(strings.ToLower(value), " [sources:")
+	if marker == -1 {
+		return value
+	}
+
+	return strings.TrimSpace(value[:marker])
 }
 
 func normalizeItemContent(value string) string {
