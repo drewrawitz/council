@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
+	"time"
 
 	"council/internal/config"
 	"council/internal/run"
@@ -59,7 +61,13 @@ func runAsk(args []string) int {
 	}
 
 	repo := storage.NewRepository(runsDir)
-	record, err := run.Execute(context.Background(), repo, loaded.Config, parsed.teamName, parsed.prompt)
+	prompt, err := loadPrompt(parsed)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+
+	record, err := run.Execute(context.Background(), repo, loaded.Config, parsed.teamName, prompt, printRunEvent)
 	if err != nil {
 		if record != nil {
 			fmt.Fprintf(os.Stderr, "run failed: %s\nrun id: %s\n", err, record.ID)
@@ -76,7 +84,6 @@ func runAsk(args []string) int {
 	if record.FinalAnswer != "" {
 		fmt.Println(record.FinalAnswer)
 	}
-	fmt.Fprintf(os.Stderr, "run id: %s\n", record.ID)
 	return 0
 }
 
@@ -208,6 +215,8 @@ func printRootUsage(stream *os.File) {
 	fmt.Fprintln(stream)
 	fmt.Fprintln(stream, "Usage:")
 	fmt.Fprintln(stream, "  council ask \"prompt\" --team <name> [--config path] [--json]")
+	fmt.Fprintln(stream, "  council ask --prompt-file <path> --team <name> [--config path] [--json]")
+	fmt.Fprintln(stream, "  council ask --stdin --team <name> [--config path] [--json]")
 	fmt.Fprintln(stream, "  council config validate [--config path]")
 	fmt.Fprintln(stream, "  council plan --team <name> [--config path]")
 	fmt.Fprintln(stream, "  council show <run-id> [--json]")
@@ -221,6 +230,8 @@ func printConfigUsage(stream *os.File) {
 func printAskUsage(stream *os.File) {
 	fmt.Fprintln(stream, "Usage:")
 	fmt.Fprintln(stream, "  council ask \"prompt\" --team <name> [--config path] [--json]")
+	fmt.Fprintln(stream, "  council ask --prompt-file <path> --team <name> [--config path] [--json]")
+	fmt.Fprintln(stream, "  council ask --stdin --team <name> [--config path] [--json]")
 }
 
 func printShowUsage(stream *os.File) {
@@ -232,6 +243,8 @@ type askArgs struct {
 	configPath string
 	teamName   string
 	prompt     string
+	promptFile string
+	readStdin  bool
 	jsonOutput bool
 }
 
@@ -253,6 +266,16 @@ func parseAskArgs(args []string) (*askArgs, error) {
 			parsed.configPath = args[index]
 		case strings.HasPrefix(arg, "--config="):
 			parsed.configPath = strings.TrimPrefix(arg, "--config=")
+		case arg == "--prompt-file":
+			index++
+			if index >= len(args) {
+				return nil, fmt.Errorf("--prompt-file requires a value")
+			}
+			parsed.promptFile = args[index]
+		case strings.HasPrefix(arg, "--prompt-file="):
+			parsed.promptFile = strings.TrimPrefix(arg, "--prompt-file=")
+		case arg == "--stdin":
+			parsed.readStdin = true
 		case arg == "--team":
 			index++
 			if index >= len(args) {
@@ -274,8 +297,23 @@ func parseAskArgs(args []string) (*askArgs, error) {
 		return nil, fmt.Errorf("ask requires --team")
 	}
 
-	if parsed.prompt == "" {
-		return nil, fmt.Errorf("ask requires a prompt")
+	promptSourceCount := 0
+	if parsed.prompt != "" {
+		promptSourceCount++
+	}
+	if parsed.promptFile != "" {
+		promptSourceCount++
+	}
+	if parsed.readStdin {
+		promptSourceCount++
+	}
+
+	if promptSourceCount == 0 {
+		return nil, fmt.Errorf("ask requires a prompt, --prompt-file, or --stdin")
+	}
+
+	if promptSourceCount > 1 {
+		return nil, fmt.Errorf("ask accepts only one prompt source at a time")
 	}
 
 	return parsed, nil
@@ -318,4 +356,64 @@ func writeJSON(value any) int {
 
 	fmt.Println(string(data))
 	return 0
+}
+
+func printRunEvent(event run.Event) {
+	switch event.Type {
+	case run.EventRunStarted:
+		fmt.Fprintf(os.Stderr, "run id: %s\n", event.RunID)
+	case run.EventAgentStarted:
+		fmt.Fprintf(os.Stderr, "starting %s via %s (%s)\n", event.AgentName, event.Provider, event.Model)
+	case run.EventAgentCompleted:
+		fmt.Fprintf(os.Stderr, "completed %s in %s\n", event.AgentName, formatDuration(event.Duration))
+	case run.EventAgentFailed:
+		fmt.Fprintf(os.Stderr, "failed %s after %s: %v\n", event.AgentName, formatDuration(event.Duration), event.Err)
+	case run.EventSynthesisStarted:
+		fmt.Fprintf(os.Stderr, "starting synthesis via %s (%s)\n", event.AgentName, event.Model)
+	case run.EventSynthesisComplete:
+		fmt.Fprintf(os.Stderr, "completed synthesis in %s\n", formatDuration(event.Duration))
+	}
+}
+
+func formatDuration(duration time.Duration) string {
+	if duration < time.Second {
+		return duration.Round(time.Millisecond).String()
+	}
+
+	return duration.Round(100 * time.Millisecond).String()
+}
+
+func loadPrompt(args *askArgs) (string, error) {
+	switch {
+	case args == nil:
+		return "", fmt.Errorf("ask arguments are required")
+	case args.prompt != "":
+		return args.prompt, nil
+	case args.promptFile != "":
+		data, err := os.ReadFile(args.promptFile)
+		if err != nil {
+			return "", fmt.Errorf("read prompt file %q: %w", args.promptFile, err)
+		}
+
+		prompt := strings.TrimSpace(string(data))
+		if prompt == "" {
+			return "", fmt.Errorf("prompt file %q is empty", args.promptFile)
+		}
+
+		return prompt, nil
+	case args.readStdin:
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return "", fmt.Errorf("read prompt from stdin: %w", err)
+		}
+
+		prompt := strings.TrimSpace(string(data))
+		if prompt == "" {
+			return "", fmt.Errorf("stdin prompt is empty")
+		}
+
+		return prompt, nil
+	default:
+		return "", fmt.Errorf("ask requires a prompt source")
+	}
 }

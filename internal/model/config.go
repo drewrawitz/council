@@ -5,6 +5,9 @@ const (
 	ProviderTypeMock        = "mock"
 	ProviderTypeSubprocess  = "subprocess"
 	ProtocolKindSingleRound = "single_round"
+	SubprocessStdinCombined = "combined_prompt"
+	SubprocessStdinPrompt   = "prompt"
+	SubprocessStdinNone     = "none"
 )
 
 type Config struct {
@@ -19,6 +22,7 @@ type ProviderConfig struct {
 	Type    string   `yaml:"type" json:"type"`
 	Command string   `yaml:"command,omitempty" json:"command,omitempty"`
 	Args    []string `yaml:"args,omitempty" json:"args,omitempty"`
+	Stdin   string   `yaml:"stdin,omitempty" json:"stdin,omitempty"`
 }
 
 type AgentConfig struct {

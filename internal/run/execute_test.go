@@ -14,7 +14,7 @@ func TestExecutePersistsCompletedRunWithMockProvider(t *testing.T) {
 	t.Parallel()
 
 	repo := storage.NewRepository(filepath.Join(t.TempDir(), "runs"))
-	record, err := Execute(context.Background(), repo, validConfig(), "default", "Review this plan")
+	record, err := Execute(context.Background(), repo, validConfig(), "default", "Review this plan", nil)
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
@@ -29,6 +29,10 @@ func TestExecutePersistsCompletedRunWithMockProvider(t *testing.T) {
 
 	if len(record.AgentOutputs) != 2 {
 		t.Fatalf("len(AgentOutputs) = %d, want 2", len(record.AgentOutputs))
+	}
+
+	if record.AgentOutputs[0].Status != "completed" || record.AgentOutputs[1].Status != "completed" {
+		t.Fatalf("agent statuses = %q and %q, want completed", record.AgentOutputs[0].Status, record.AgentOutputs[1].Status)
 	}
 
 	if record.Synthesis == nil {
@@ -93,7 +97,7 @@ func TestExecutePersistsFailedRunWhenAgentInvocationFails(t *testing.T) {
 	}
 
 	repo := storage.NewRepository(filepath.Join(t.TempDir(), "runs"))
-	record, err := Execute(context.Background(), repo, cfg, "default", "Review this plan")
+	record, err := Execute(context.Background(), repo, cfg, "default", "Review this plan", nil)
 	if err == nil {
 		t.Fatal("Execute returned nil error for broken subprocess provider")
 	}
@@ -120,6 +124,10 @@ func TestExecutePersistsFailedRunWhenAgentInvocationFails(t *testing.T) {
 
 	if record.AgentOutputs[0].Error == "" {
 		t.Fatal("AgentOutputs[0].Error is empty")
+	}
+
+	if record.AgentOutputs[0].Status != "failed" {
+		t.Fatalf("AgentOutputs[0].Status = %q, want failed", record.AgentOutputs[0].Status)
 	}
 
 	if !strings.Contains(record.Error, "agent round failed") {

@@ -98,6 +98,54 @@ protocols:
 	}
 }
 
+func TestValidateRejectsSubprocessProviderWithoutPromptDelivery(t *testing.T) {
+	t.Parallel()
+
+	cfg := validConfig()
+	cfg.Providers["mock"] = model.ProviderConfig{
+		Type:    model.ProviderTypeSubprocess,
+		Command: "/bin/sh",
+		Args:    []string{"-c", "cat"},
+		Stdin:   model.SubprocessStdinNone,
+	}
+
+	err := Validate(cfg)
+	if err == nil {
+		t.Fatal("Validate returned nil error for subprocess provider without prompt delivery")
+	}
+
+	if !strings.Contains(err.Error(), "must deliver the user prompt") {
+		t.Fatalf("Validate error %q did not mention user prompt delivery", err)
+	}
+
+	if !strings.Contains(err.Error(), "must deliver the system prompt") {
+		t.Fatalf("Validate error %q did not mention system prompt delivery", err)
+	}
+}
+
+func TestValidateAcceptsSubprocessProviderWithArgumentPlaceholders(t *testing.T) {
+	t.Parallel()
+
+	cfg := validConfig()
+	cfg.Providers["mock"] = model.ProviderConfig{
+		Type:    model.ProviderTypeSubprocess,
+		Command: "claude",
+		Args: []string{
+			"--print",
+			"--model",
+			"{model}",
+			"--system-prompt",
+			"{system_prompt}",
+			"{prompt}",
+		},
+		Stdin: model.SubprocessStdinNone,
+	}
+
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("Validate returned error for args-delivered subprocess prompt: %v", err)
+	}
+}
+
 func validConfig() *model.Config {
 	return &model.Config{
 		Version: model.ConfigVersion,

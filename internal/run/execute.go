@@ -13,7 +13,30 @@ import (
 	"council/internal/storage"
 )
 
-func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, teamName string, prompt string) (*model.RunRecord, error) {
+type EventType string
+
+const (
+	EventRunStarted        EventType = "run_started"
+	EventAgentStarted      EventType = "agent_started"
+	EventAgentCompleted    EventType = "agent_completed"
+	EventAgentFailed       EventType = "agent_failed"
+	EventSynthesisStarted  EventType = "synthesis_started"
+	EventSynthesisComplete EventType = "synthesis_completed"
+)
+
+type Event struct {
+	Type      EventType
+	RunID     string
+	AgentName string
+	Provider  string
+	Model     string
+	Duration  time.Duration
+	Err       error
+}
+
+type Observer func(Event)
+
+func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, teamName string, prompt string, observer Observer) (*model.RunRecord, error) {
 	plan, err := BuildPlan(cfg, teamName)
 	if err != nil {
 		return nil, err
@@ -28,6 +51,23 @@ func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, t
 		StartedAt: time.Now().UTC(),
 	}
 
+	notify(observer, Event{Type: EventRunStarted, RunID: runRecord.ID})
+
+	team := cfg.Teams[teamName]
+	runRecord.AgentOutputs = make([]model.AgentOutput, len(team.Members))
+	for index, memberName := range team.Members {
+		agent := cfg.Agents[memberName]
+		runRecord.AgentOutputs[index] = model.AgentOutput{
+			AgentName:     memberName,
+			Provider:      agent.Provider,
+			Model:         agent.Model,
+			Role:          agent.Role,
+			Status:        "pending",
+			Round:         0,
+			SequenceIndex: index,
+		}
+	}
+
 	if err := repo.Save(runRecord); err != nil {
 		return nil, err
 	}
@@ -37,8 +77,8 @@ func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, t
 		return failRun(repo, runRecord, err)
 	}
 
-	team := cfg.Teams[teamName]
-	outputs := make([]model.AgentOutput, len(team.Members))
+	outputs := runRecord.AgentOutputs
+	var mu sync.Mutex
 
 	var wg sync.WaitGroup
 	for index, memberName := range team.Members {
@@ -48,6 +88,20 @@ func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, t
 			defer wg.Done()
 
 			agent := cfg.Agents[memberName]
+			notify(observer, Event{
+				Type:      EventAgentStarted,
+				RunID:     runRecord.ID,
+				AgentName: memberName,
+				Provider:  agent.Provider,
+				Model:     agent.Model,
+			})
+
+			mu.Lock()
+			outputs[index].Status = "running"
+			runRecord.AgentOutputs = outputs
+			_ = repo.Save(runRecord)
+			mu.Unlock()
+
 			start := time.Now()
 			result, err := providerSet[agent.Provider].Generate(ctx, providers.GenerateRequest{
 				RunID:        runRecord.ID,
@@ -63,6 +117,7 @@ func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, t
 				Provider:      agent.Provider,
 				Model:         agent.Model,
 				Role:          agent.Role,
+				Status:        "completed",
 				Content:       result.Content,
 				RawStdout:     result.RawStdout,
 				RawStderr:     result.RawStderr,
@@ -76,7 +131,35 @@ func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, t
 
 			if err != nil {
 				outputs[index].Error = err.Error()
+				outputs[index].Status = "failed"
 			}
+
+			mu.Lock()
+			runRecord.AgentOutputs = outputs
+			_ = repo.Save(runRecord)
+			mu.Unlock()
+
+			if err != nil {
+				notify(observer, Event{
+					Type:      EventAgentFailed,
+					RunID:     runRecord.ID,
+					AgentName: memberName,
+					Provider:  agent.Provider,
+					Model:     agent.Model,
+					Duration:  time.Since(start),
+					Err:       err,
+				})
+				return
+			}
+
+			notify(observer, Event{
+				Type:      EventAgentCompleted,
+				RunID:     runRecord.ID,
+				AgentName: memberName,
+				Provider:  agent.Provider,
+				Model:     agent.Model,
+				Duration:  time.Since(start),
+			})
 		}(index, memberName)
 	}
 
@@ -93,6 +176,13 @@ func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, t
 	}
 
 	synthesizer := cfg.Agents[plan.Synthesizer]
+	notify(observer, Event{
+		Type:      EventSynthesisStarted,
+		RunID:     runRecord.ID,
+		AgentName: plan.Synthesizer,
+		Provider:  synthesizer.Provider,
+		Model:     synthesizer.Model,
+	})
 	synthesisStart := time.Now()
 	synthesisResult, err := providerSet[synthesizer.Provider].Generate(ctx, providers.GenerateRequest{
 		RunID:        runRecord.ID,
@@ -123,6 +213,15 @@ func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, t
 		runRecord.Synthesis.Error = err.Error()
 		return failRun(repo, runRecord, fmt.Errorf("synthesis failed: %w", err))
 	}
+
+	notify(observer, Event{
+		Type:      EventSynthesisComplete,
+		RunID:     runRecord.ID,
+		AgentName: plan.Synthesizer,
+		Provider:  synthesizer.Provider,
+		Model:     synthesizer.Model,
+		Duration:  time.Since(synthesisStart),
+	})
 
 	runRecord.FinalAnswer = synthesisResult.Content
 	completedAt := time.Now().UTC()
@@ -205,4 +304,12 @@ func newRunID() string {
 	}
 
 	return fmt.Sprintf("%s-%x", time.Now().UTC().Format("20060102T150405Z"), randomBytes)
+}
+
+func notify(observer Observer, event Event) {
+	if observer == nil {
+		return
+	}
+
+	observer(event)
 }

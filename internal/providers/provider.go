@@ -57,7 +57,7 @@ func New(cfg model.ProviderConfig) (Provider, error) {
 			return nil, fmt.Errorf("subprocess provider requires command")
 		}
 
-		return NewSubprocessProvider(cfg.Command, cfg.Args), nil
+		return NewSubprocessProvider(cfg.Command, cfg.Args, cfg.Stdin), nil
 	default:
 		return nil, fmt.Errorf("unsupported provider type %q", cfg.Type)
 	}

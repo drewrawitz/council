@@ -21,6 +21,7 @@ type AgentOutput struct {
 	Provider      string `json:"provider"`
 	Model         string `json:"model"`
 	Role          string `json:"role"`
+	Status        string `json:"status,omitempty"`
 	Content       string `json:"content"`
 	RawStdout     string `json:"raw_stdout,omitempty"`
 	RawStderr     string `json:"raw_stderr,omitempty"`

@@ -91,6 +91,30 @@ func Validate(cfg *model.Config) error {
 		if provider.Type == model.ProviderTypeSubprocess && strings.TrimSpace(provider.Command) == "" {
 			problems = append(problems, providerPath+".command is required for subprocess providers")
 		}
+
+		if provider.Type == model.ProviderTypeSubprocess {
+			stdinMode := provider.Stdin
+			if strings.TrimSpace(stdinMode) == "" {
+				stdinMode = model.SubprocessStdinCombined
+			}
+
+			switch stdinMode {
+			case model.SubprocessStdinCombined, model.SubprocessStdinPrompt, model.SubprocessStdinNone:
+			default:
+				problems = append(problems, fmt.Sprintf("%s.stdin %q is unsupported", providerPath, provider.Stdin))
+			}
+
+			hasPromptPlaceholder := hasAnyPlaceholder(provider.Args, "{prompt}", "{combined_prompt}")
+			hasSystemPlaceholder := hasAnyPlaceholder(provider.Args, "{system_prompt}", "{combined_prompt}")
+
+			if stdinMode == model.SubprocessStdinNone && !hasPromptPlaceholder {
+				problems = append(problems, providerPath+" must deliver the user prompt via stdin or args placeholders")
+			}
+
+			if stdinMode != model.SubprocessStdinCombined && !hasSystemPlaceholder {
+				problems = append(problems, providerPath+" must deliver the system prompt via combined stdin or args placeholders")
+			}
+		}
 	}
 
 	for name, agent := range cfg.Agents {
@@ -209,4 +233,16 @@ func resolvePath(path string) (string, error) {
 	}
 
 	return "", fmt.Errorf("no config file found; looked for %s", strings.Join(defaultPaths, ", "))
+}
+
+func hasAnyPlaceholder(values []string, placeholders ...string) bool {
+	for _, value := range values {
+		for _, placeholder := range placeholders {
+			if strings.Contains(value, placeholder) {
+				return true
+			}
+		}
+	}
+
+	return false
 }

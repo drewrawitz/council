@@ -1,0 +1,63 @@
+version: 1
+
+providers:
+  claude:
+    type: subprocess
+    command: claude
+    args:
+      - --print
+      - --output-format
+      - text
+      - --no-session-persistence
+      - --tools
+      - ""
+      - --model
+      - "{model}"
+      - --system-prompt
+      - "{system_prompt}"
+      - "{prompt}"
+    stdin: none
+
+  codex:
+    type: subprocess
+    command: codex
+    args:
+      - exec
+      - -c
+      - model_reasoning_effort="high"
+      - --skip-git-repo-check
+      - --sandbox
+      - read-only
+      - --color
+      - never
+      - --model
+      - "{model}"
+      - --output-last-message
+      - "{output_file}"
+      - "-"
+    stdin: combined_prompt
+
+agents:
+  claude-architect:
+    provider: claude
+    model: claude-sonnet-4-6
+    role: pragmatic-architect
+    system_prompt: |
+      Focus on practical tradeoffs, failure modes, and second-order effects.
+
+  codex-reviewer:
+    provider: codex
+    model: gpt-5-codex
+    role: implementation-reviewer
+    system_prompt: |
+      Focus on correctness, regressions, edge cases, and hidden assumptions.
+
+teams:
+  local-duo:
+    members: [claude-architect, codex-reviewer]
+    synthesizer: claude-architect
+    protocol: single-round
+
+protocols:
+  single-round:
+    kind: single_round
