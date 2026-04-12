@@ -18,8 +18,11 @@ if [[ -n "${COUNCIL_BIN:-}" ]]; then
   runner=("$COUNCIL_BIN")
 elif [[ -x "$repo_root/council" ]]; then
   runner=("$repo_root/council")
+elif command -v go >/dev/null 2>&1; then
+  runner=(go -C "$repo_root" run ./cmd/council)
 else
-  runner=(go run "$repo_root/cmd/council")
+  printf 'Council runner not found. Build %s/council or set COUNCIL_BIN.\n' "$repo_root" >&2
+  exit 127
 fi
 
 command=("${runner[@]}" ask --stdin)

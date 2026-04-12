@@ -68,7 +68,7 @@ teams:
     synthesizer: sonnet-4_6
     protocol: single-round
     run:
-      max_rounds: 2
+      max_rounds: 1
       max_time: 12m
 
   default:
@@ -76,7 +76,7 @@ teams:
     synthesizer: sonnet-4_6
     protocol: single-round
     run:
-      max_rounds: 2
+      max_rounds: 1
       max_time: 12m
 
 protocols:
