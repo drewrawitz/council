@@ -95,6 +95,10 @@ func TestBuildSynthesisPromptPrefersNormalizedItemsWithRawFallback(t *testing.T)
 		t.Fatalf("prompt %q did not instruct synthesis to prefer items", prompt)
 	}
 
+	if !strings.Contains(prompt, "follows any explicit output format") {
+		t.Fatalf("prompt %q did not preserve explicit output requirements", prompt)
+	}
+
 	if !strings.Contains(prompt, "Raw agent outputs (fallback context):") {
 		t.Fatalf("prompt %q did not include raw fallback section", prompt)
 	}
@@ -135,6 +139,10 @@ func TestBuildRoundPromptUsesNormalizedItemsWithoutOtherRawOutputs(t *testing.T)
 
 	if !strings.Contains(prompt, "Your previous answer:\nMy previous answer") {
 		t.Fatalf("prompt %q did not include own previous answer", prompt)
+	}
+
+	if !strings.Contains(prompt, "Return one revised answer in the format required by the original task") {
+		t.Fatalf("prompt %q did not preserve original task format requirements", prompt)
 	}
 
 	if strings.Contains(prompt, "Raw agent outputs") {
@@ -183,7 +191,7 @@ func TestExtractItemsSkipsRoundProtocolScaffolding(t *testing.T) {
 			"Instructions:",
 			"1. Critique weak assumptions, gaps, and edge cases relevant to your role.",
 			"2. Revise your answer using the normalized items above.",
-			"3. Return one revised Markdown answer, not a transcript of the protocol.",
+			"3. Return one revised answer in the format required by the original task. If the original task does not specify a format, use Markdown. Do not return a transcript of the protocol.",
 		}, "\n"),
 	}})
 

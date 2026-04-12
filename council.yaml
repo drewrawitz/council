@@ -46,6 +46,14 @@ agents:
       Push hard on failure modes, missing assumptions, implementation risk, and weak reasoning.
       Prefer concrete objections over generic critique.
 
+  gpt-5_4-synth:
+    provider: codex
+    model: gpt-5.4
+    role: synthesizer
+    system_prompt: |
+      Act as the team integrator.
+      Contribute concise integration points during rounds, then synthesize one clear final answer that resolves conflicts where possible.
+
   opus-4_6:
     provider: claude
     model: claude-opus-4-6
@@ -54,18 +62,10 @@ agents:
       Take a strategic, first-principles view.
       Build the strongest plan, surface tradeoffs, and improve the structure of the answer.
 
-  sonnet-4_6:
-    provider: claude
-    model: claude-sonnet-4-6
-    role: synthesizer
-    system_prompt: |
-      Act as the team integrator.
-      Contribute concise integration points during rounds, then synthesize one clear final answer that resolves conflicts where possible.
-
 teams:
   a-team:
     members: [gpt-5_4-xhigh, opus-4_6]
-    synthesizer: sonnet-4_6
+    synthesizer: gpt-5_4-synth
     protocol: single-round
     run:
       max_rounds: 1
@@ -73,7 +73,7 @@ teams:
 
   default:
     members: [gpt-5_4-xhigh, opus-4_6]
-    synthesizer: sonnet-4_6
+    synthesizer: gpt-5_4-synth
     protocol: single-round
     run:
       max_rounds: 1

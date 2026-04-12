@@ -180,7 +180,7 @@ func buildSynthesisPrompt(prompt string, artifacts []model.Artifact, outputs []m
 		body.WriteString("\n")
 	}
 
-	body.WriteString("\nProduce one concise final answer in Markdown. Resolve disagreements where possible and note remaining uncertainty briefly when it matters.\n")
+	body.WriteString("\nProduce one final answer that follows any explicit output format, section order, heading text, or stopping rule from the original task exactly. If the original task does not specify an output format, use concise Markdown. Resolve disagreements where possible and note remaining uncertainty briefly when it matters.\n")
 
 	return body.String()
 }
@@ -240,7 +240,7 @@ func buildRoundPrompt(
 	body.WriteString("Instructions:\n")
 	body.WriteString("1. Critique weak assumptions, gaps, and edge cases relevant to your role.\n")
 	body.WriteString("2. Revise your answer using the normalized items above.\n")
-	body.WriteString("3. Return one revised Markdown answer, not a transcript of the protocol.\n")
+	body.WriteString("3. Return one revised answer in the format required by the original task. If the original task does not specify a format, use Markdown. Do not return a transcript of the protocol.\n")
 
 	return body.String()
 }
@@ -448,7 +448,9 @@ func shouldSkipCandidate(value string) bool {
 	for _, marker := range []string{
 		"critique/revise round ",
 		"revise your answer using the normalized items above",
-		"return one revised markdown answer",
+		"return one revised answer in the format required by the original task",
+		"if the original task does not specify a format",
+		"do not return a transcript of the protocol",
 		"critique weak assumptions, gaps, and edge cases relevant to your role",
 	} {
 		if strings.HasPrefix(lower, marker) {
