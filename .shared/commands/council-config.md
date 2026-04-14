@@ -9,7 +9,7 @@ Use this when the user wants to create or update Council's persistent configurat
 
 Invocation notes:
 - In Claude Code and OpenCode, invoke this as `/council-config ...`.
-- In Codex, invoke this skill explicitly as `$council-config ...`.
+- In Codex, install or symlink this skill into `~/.codex/skills/council-config/SKILL.md`. Once installed, Codex should surface it in the slash picker as `/council-config`.
 
 Treat the user's current request, or `$ARGUMENTS` when the host provides it, as a natural-language request to modify Council's persistent configuration in `council.yaml`.
 
@@ -17,7 +17,6 @@ Examples:
 - `/council-config make the A-team use GPT-5.4 xhigh, Opus 4.6, and Sonnet 4.6 as synthesizer.`
 - `/council-config add a fast team that only uses Sonnet with one round and a 60 second timeout.`
 - `/council-config make default retention minimal and keep raw outputs off.`
-- `$council-config add a fast team that only uses Sonnet with one round and a 60 second timeout.`
 
 Workflow:
 

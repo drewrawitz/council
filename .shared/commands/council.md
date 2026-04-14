@@ -9,14 +9,13 @@ Use Council as the backend deliberation engine for the current task.
 
 Invocation notes:
 - In Claude Code and OpenCode, invoke this as `/council ...`.
-- In Codex, invoke this skill explicitly as `$council ...`. Codex currently exposes built-in slash commands only, so repo-local Council integration lives as a skill rather than a custom `/council` command.
+- In Codex, install or symlink this skill into `~/.codex/skills/council/SKILL.md`. Once installed, Codex should surface it in the slash picker as `/council`.
 
 Treat the user's current request, or `$ARGUMENTS` when the host provides it, as a natural-language request, not as preformatted CLI flags.
 
 Examples of valid usage:
 - `/council use the gh CLI to review pr 471. use the A-team.`
 - `/council /review-pr 554`
-- `$council /review-pr 554`
 - `/council compare @PROJECT_BRIEF.md with @council.yaml and tell me what is missing.`
 - `/council use the default team and pressure-test this implementation plan.`
 - `/council use the A-team, run 2 rounds, stop after 90 seconds, and keep agent outputs.`
@@ -54,7 +53,7 @@ EOF
 
 12. Return the synthesized Council answer in a normal assistant message, with the full Council output text in the message body. Do not say the answer is "already posted above", do not tell the user to inspect tool output, and do not replace the answer with a summary. Mention the run id only when it is useful for follow-up inspection.
 
-If the user is asking to change Council's persistent configuration itself, such as defining or editing teams in `council.yaml`, do not treat that as a run request. Instead, tell them to use `/council-config` or `$council-config`, or handle the config edit directly in the host session.
+If the user is asking to change Council's persistent configuration itself, such as defining or editing teams in `council.yaml`, do not treat that as a run request. Instead, tell them to use `/council-config`, or handle the config edit directly in the host session.
 
 Keep the host tool responsible for:
 - gathering context
