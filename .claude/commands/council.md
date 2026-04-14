@@ -38,7 +38,7 @@ Workflow:
    - `keep agent outputs` or `keep transcript` -> `--retain-agent-outputs`
    - `keep raw provider output` -> `--retain-raw-provider-io`
    - `retain artifact content` -> `--retain-artifact-content`
-11. Run Council through the repo-local wrapper from the project root using a Bash heredoc so the prompt text is preserved cleanly. Only pass actual Council flags you intentionally derived from the request.
+11. Run Council through the repo-local wrapper from the project root using a Bash heredoc so the prompt text is preserved cleanly. Only pass actual Council flags you intentionally derived from the request. Capture Council's stdout as the answer body you will send back to the user.
 
 ```bash
 /Users/drewrawitz/www/council/wrappers/claude/council <derived flags> <<'EOF'
@@ -46,7 +46,7 @@ Workflow:
 EOF
 ```
 
-12. Return the synthesized Council answer to the user. Mention the run id only when it is useful for follow-up inspection.
+12. Return the synthesized Council answer in a normal assistant message, with the full Council output text in the message body. Do not say the answer is "already posted above", do not tell the user to inspect tool output, and do not replace the answer with a summary. Mention the run id only when it is useful for follow-up inspection.
 
 If the user is asking to change Council's persistent configuration itself, such as defining or editing teams in `council.yaml`, do not treat that as a run request. Instead, tell them to use `/council-config` or handle the config edit directly in the host session.
 
