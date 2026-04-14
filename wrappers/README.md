@@ -11,6 +11,7 @@ Recommended mental model:
 Recommended usage in the host tool:
 - speak to `/council` in natural language
 - mention host actions directly, for example: `use the gh CLI to review pr 471`
+- if you want to reuse another installed command such as `review-pr`, ask `/council` to load that command's instructions instead of nesting a second slash command literally in the input UI
 - mention teams naturally, for example: `use the A-team`
 - mention run parameters naturally, for example: `run 2 rounds` or `stop after 90 seconds`
 - reference files naturally with `@path/to/file`
