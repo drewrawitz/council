@@ -2,14 +2,13 @@
 name: council
 description: Use Council as the backend deliberation engine for multi-agent review, comparison, and pressure-testing tasks.
 argument-hint: [natural language request]
-allowed-tools: Bash, Read, Write, Grep
 ---
 
 Use Council as the backend deliberation engine for the current task.
 
 Invocation notes:
 - In Claude Code and OpenCode, invoke this as `/council ...`.
-- In Codex, install or symlink the whole `council` skill directory from `.shared/skills/council` into `~/.codex/skills/council`. Once installed, Codex should surface it in the slash picker as `/council`.
+- In Codex, install or symlink the whole `council` skill directory into `~/.codex/skills/council`. Once installed, Codex should surface it in the slash picker as `/council`.
 
 Treat the user's current request, or `$ARGUMENTS` when the host provides it, as a natural-language request, not as preformatted CLI flags.
 

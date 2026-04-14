@@ -1,0 +1,7 @@
+interface:
+  display_name: "Council"
+  short_description: "Run Council as a multi-agent deliberation engine"
+  default_prompt: "Use /council to synthesize multiple perspectives on this task."
+
+policy:
+  allow_implicit_invocation: false

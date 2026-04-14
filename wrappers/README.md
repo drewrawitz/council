@@ -16,8 +16,8 @@ Recommended usage in the host tool:
 - reference files naturally with `@path/to/file`
 
 For Codex specifically:
-- symlink `.shared/commands/council.md` to `~/.codex/skills/council/SKILL.md`
-- symlink `.shared/commands/council-config.md` to `~/.codex/skills/council-config/SKILL.md`
+- symlink `.shared/skills/council` to `~/.codex/skills/council`
+- symlink `.shared/skills/council-config` to `~/.codex/skills/council-config`
 - after installing those symlinks, Codex should surface them in the slash picker as `/council` and `/council-config`
 
 Use `/council-config` when you want to change persistent team definitions or run defaults in `council.yaml`.
@@ -36,7 +36,7 @@ Available entrypoints:
 - `wrappers/claude/council`
 - `wrappers/opencode/council`
 
-Shared command definitions live in `.shared/commands` and are symlinked into `.claude/commands`, `.opencode/commands`, and `.agents/skills`. Codex users should also install user-level symlinks in `~/.codex/skills`.
+Shared command definitions live in `.shared/commands`. Shared Codex-facing skill directories live in `.shared/skills`. Codex users should install user-level symlinks in `~/.codex/skills`.
 
 All wrapper entrypoints:
 - read the prompt from `stdin`

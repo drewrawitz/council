@@ -1,0 +1,7 @@
+interface:
+  display_name: "Council Config"
+  short_description: "Edit Council teams and defaults"
+  default_prompt: "Use /council-config to update Council's persistent configuration."
+
+policy:
+  allow_implicit_invocation: false

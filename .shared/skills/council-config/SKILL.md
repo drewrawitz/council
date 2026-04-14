@@ -2,14 +2,13 @@
 name: council-config
 description: Create or update Council teams and defaults in council.yaml.
 argument-hint: [natural language config request]
-allowed-tools: Read, Write, Edit, Grep
 ---
 
 Use this when the user wants to create or update Council's persistent configuration in `council.yaml`.
 
 Invocation notes:
 - In Claude Code and OpenCode, invoke this as `/council-config ...`.
-- In Codex, install or symlink the whole `council-config` skill directory from `.shared/skills/council-config` into `~/.codex/skills/council-config`. Once installed, Codex should surface it in the slash picker as `/council-config`.
+- In Codex, install or symlink the whole `council-config` skill directory into `~/.codex/skills/council-config`. Once installed, Codex should surface it in the slash picker as `/council-config`.
 
 Treat the user's current request, or `$ARGUMENTS` when the host provides it, as a natural-language request to modify Council's persistent configuration in `council.yaml`.
 

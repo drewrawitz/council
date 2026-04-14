@@ -13,7 +13,10 @@ This repo keeps one shared source of truth for the host prompt layer:
 Those files are symlinked into:
 - `.claude/commands`
 - `.opencode/commands`
-- `.agents/skills`
+
+Codex-facing skill directories live in:
+- `.shared/skills/council`
+- `.shared/skills/council-config`
 
 ## Claude Code And OpenCode
 
@@ -31,9 +34,8 @@ The wrappers used by those hosts live at:
 Codex on this machine discovers custom skills from `~/.codex/skills`. If you want Council to appear in Codex's slash picker after cloning this repo, install symlinks there:
 
 ```bash
-mkdir -p ~/.codex/skills/council ~/.codex/skills/council-config
-ln -s "$(pwd)/.shared/commands/council.md" ~/.codex/skills/council/SKILL.md
-ln -s "$(pwd)/.shared/commands/council-config.md" ~/.codex/skills/council-config/SKILL.md
+ln -s "$(pwd)/.shared/skills/council" ~/.codex/skills/council
+ln -s "$(pwd)/.shared/skills/council-config" ~/.codex/skills/council-config
 ```
 
 After restarting Codex or refreshing its skill list, Council should appear in the slash picker as:

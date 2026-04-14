@@ -1,1 +1,0 @@
-../../../.shared/commands/council-config.md
