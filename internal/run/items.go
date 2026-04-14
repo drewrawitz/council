@@ -180,7 +180,8 @@ func buildSynthesisPrompt(prompt string, artifacts []model.Artifact, outputs []m
 		body.WriteString("\n")
 	}
 
-	body.WriteString("\nProduce one final answer that follows any explicit output format, section order, heading text, or stopping rule from the original task exactly. If the original task does not specify an output format, use concise Markdown. Resolve disagreements where possible and note remaining uncertainty briefly when it matters.\n")
+	body.WriteString("\n")
+	body.WriteString(finalAnswerContract())
 
 	return body.String()
 }
@@ -240,9 +241,31 @@ func buildRoundPrompt(
 	body.WriteString("Instructions:\n")
 	body.WriteString("1. Critique weak assumptions, gaps, and edge cases relevant to your role.\n")
 	body.WriteString("2. Revise your answer using the normalized items above.\n")
-	body.WriteString("3. Return one revised answer in the format required by the original task. If the original task does not specify a format, use Markdown. Do not return a transcript of the protocol.\n")
+	body.WriteString("3. Return one revised answer that already matches this final response contract:\n")
+	body.WriteString(indentLines(finalAnswerContract(), "   "))
+	body.WriteString("\n")
 
 	return body.String()
+}
+
+func finalAnswerContract() string {
+	return strings.Join([]string{
+		"Final response contract:",
+		"1. Always start with a `## Brief` section.",
+		"2. In `## Brief`, summarize the main findings, where the council broadly agrees, where there are disagreements or materially different takes, and any remaining uncertainty that matters.",
+		"3. If the original task specifies an explicit output format, section order, heading text, or stopping rule, reproduce that requested deliverable under a `## Requested Output` section and preserve that requested structure there.",
+		"4. If the original task does not specify an explicit requested output, omit `## Requested Output` and return only the brief in concise Markdown.",
+		"5. Do not include a protocol transcript unless the original task explicitly asks for it.",
+	}, "\n")
+}
+
+func indentLines(text string, prefix string) string {
+	lines := strings.Split(text, "\n")
+	for index, line := range lines {
+		lines[index] = prefix + line
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 func buildTaskContext(prompt string, artifacts []model.Artifact) string {
@@ -448,7 +471,14 @@ func shouldSkipCandidate(value string) bool {
 	for _, marker := range []string{
 		"critique/revise round ",
 		"revise your answer using the normalized items above",
+		"return one revised answer that already matches this final response contract",
 		"return one revised answer in the format required by the original task",
+		"final response contract:",
+		"always start with a `## brief` section",
+		"in `## brief`, summarize the main findings",
+		"if the original task specifies an explicit output format",
+		"if the original task does not specify an explicit requested output",
+		"do not include a protocol transcript unless the original task explicitly asks for it",
 		"if the original task does not specify a format",
 		"do not return a transcript of the protocol",
 		"critique weak assumptions, gaps, and edge cases relevant to your role",

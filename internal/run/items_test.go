@@ -95,8 +95,20 @@ func TestBuildSynthesisPromptPrefersNormalizedItemsWithRawFallback(t *testing.T)
 		t.Fatalf("prompt %q did not instruct synthesis to prefer items", prompt)
 	}
 
-	if !strings.Contains(prompt, "follows any explicit output format") {
-		t.Fatalf("prompt %q did not preserve explicit output requirements", prompt)
+	if !strings.Contains(prompt, "Final response contract:") {
+		t.Fatalf("prompt %q did not include final response contract", prompt)
+	}
+
+	if !strings.Contains(prompt, "## Brief") {
+		t.Fatalf("prompt %q did not require a brief section", prompt)
+	}
+
+	if !strings.Contains(prompt, "## Requested Output") {
+		t.Fatalf("prompt %q did not describe the requested output section", prompt)
+	}
+
+	if !strings.Contains(prompt, "broadly agrees") || !strings.Contains(prompt, "disagreements") {
+		t.Fatalf("prompt %q did not require agreement and disagreement synthesis", prompt)
 	}
 
 	if !strings.Contains(prompt, "Raw agent outputs (fallback context):") {
@@ -141,8 +153,16 @@ func TestBuildRoundPromptUsesNormalizedItemsWithoutOtherRawOutputs(t *testing.T)
 		t.Fatalf("prompt %q did not include own previous answer", prompt)
 	}
 
-	if !strings.Contains(prompt, "Return one revised answer in the format required by the original task") {
-		t.Fatalf("prompt %q did not preserve original task format requirements", prompt)
+	if !strings.Contains(prompt, "Return one revised answer that already matches this final response contract") {
+		t.Fatalf("prompt %q did not require the new final response contract", prompt)
+	}
+
+	if !strings.Contains(prompt, "## Brief") {
+		t.Fatalf("prompt %q did not require a brief section", prompt)
+	}
+
+	if !strings.Contains(prompt, "## Requested Output") {
+		t.Fatalf("prompt %q did not describe the requested output section", prompt)
 	}
 
 	if strings.Contains(prompt, "Raw agent outputs") {
@@ -191,7 +211,13 @@ func TestExtractItemsSkipsRoundProtocolScaffolding(t *testing.T) {
 			"Instructions:",
 			"1. Critique weak assumptions, gaps, and edge cases relevant to your role.",
 			"2. Revise your answer using the normalized items above.",
-			"3. Return one revised answer in the format required by the original task. If the original task does not specify a format, use Markdown. Do not return a transcript of the protocol.",
+			"3. Return one revised answer that already matches this final response contract:",
+			"   Final response contract:",
+			"   1. Always start with a `## Brief` section.",
+			"   2. In `## Brief`, summarize the main findings, where the council broadly agrees, where there are disagreements or materially different takes, and any remaining uncertainty that matters.",
+			"   3. If the original task specifies an explicit output format, section order, heading text, or stopping rule, reproduce that requested deliverable under a `## Requested Output` section and preserve that requested structure there.",
+			"   4. If the original task does not specify an explicit requested output, omit `## Requested Output` and return only the brief in concise Markdown.",
+			"   5. Do not include a protocol transcript unless the original task explicitly asks for it.",
 		}, "\n"),
 	}})
 

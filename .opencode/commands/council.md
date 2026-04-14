@@ -16,13 +16,13 @@ Examples of valid usage:
 Workflow:
 
 1. Parse `$ARGUMENTS` as instructions for the host tool.
-2. If `$ARGUMENTS` starts with another slash command, treat that slash command as the underlying task. Follow its host-side workflow as needed, gather the relevant context, and preserve any explicit final-answer or `Output Format` requirements from that command when you call Council.
+2. If `$ARGUMENTS` starts with another slash command, treat that slash command as the underlying task. Follow its host-side workflow as needed, gather the relevant context, and preserve any explicit final-answer or `Output Format` requirements from that command as the requested output portion of Council's final answer.
 3. If the request asks you to use host tools like `gh`, do that first and gather the relevant context before calling Council.
 4. Build a concise task brief from:
    - the user's latest request
    - any relevant conversation context
    - any host-tool output you collected
-5. If the task or source slash command specifies a final answer format, include that format verbatim in the task brief and tell Council to preserve it exactly.
+5. Tell Council to always start the final answer with a short `## Brief` section that summarizes the main findings, broad agreements, disagreements, and remaining uncertainty. If the task or source slash command specifies a final answer format, include that format verbatim in the task brief and tell Council to place it under `## Requested Output`. If there is no explicit requested output format, tell Council to omit `## Requested Output` and return only the brief in concise Markdown.
 6. If the user supplied screenshots or other visual context, first convert the relevant details into text. Council currently accepts text artifacts only.
 7. Treat explicit `@file` references in `$ARGUMENTS` as host-side context. Read or expand them and include the relevant file text directly in the task brief you send to Council.
 8. Only pass `--file <path>` to Council when you intentionally want Council itself to persist artifact metadata/content for that file. This should be optional, not the default path for slash-command usage.
