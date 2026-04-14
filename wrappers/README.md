@@ -3,7 +3,7 @@
 These wrappers are intentionally thin adapters around `council ask`.
 
 Recommended mental model:
-- use Claude Code or OpenCode as the interactive UI and tool host
+- use Claude Code, OpenCode, or Codex as the interactive UI and tool host
 - use Council as the behind-the-scenes deliberation engine
 - let the host gather context, use skills, inspect code, and translate screenshots into text
 - hand Council a clean task brief plus any local text artifacts
@@ -14,6 +14,10 @@ Recommended usage in the host tool:
 - mention teams naturally, for example: `use the A-team`
 - mention run parameters naturally, for example: `run 2 rounds` or `stop after 90 seconds`
 - reference files naturally with `@path/to/file`
+
+For Codex specifically:
+- use the repo-scoped `$council` and `$council-config` skills in `.agents/skills`
+- Codex currently exposes built-in slash commands only, so repo-local Council integration uses skills rather than custom `/council` commands
 
 Use `/council-config` when you want to change persistent team definitions or run defaults in `council.yaml`.
 
@@ -27,10 +31,13 @@ The slash-command layer should:
 - default to `a-team` when no team is specified
 
 Available entrypoints:
+- `wrappers/council`
 - `wrappers/claude/council`
 - `wrappers/opencode/council`
 
-Both wrappers:
+Shared command definitions live in `.shared/commands` and are symlinked into `.claude/commands`, `.opencode/commands`, and `.agents/skills`.
+
+All wrapper entrypoints:
 - read the prompt from `stdin`
 - call `council ask --stdin`
 - pass any CLI flags through unchanged
@@ -51,11 +58,11 @@ Supported environment variables:
 Examples:
 
 ```bash
-printf 'Review this plan' | wrappers/claude/council
+printf 'Review this plan' | wrappers/council
 ```
 
 ```bash
-printf 'Review this plan' | wrappers/opencode/council --team a-team --json
+printf 'Review this plan' | wrappers/council --team a-team --json
 ```
 
 For screenshots and rich host context:

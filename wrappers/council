@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
+
+has_team_flag=false
+for arg in "$@"; do
+  case "$arg" in
+    --team|--team=*)
+      has_team_flag=true
+      ;;
+  esac
+done
+
+runner=()
+if [[ -n "${COUNCIL_BIN:-}" ]]; then
+  runner=("$COUNCIL_BIN")
+elif [[ -x "$repo_root/council" ]]; then
+  runner=("$repo_root/council")
+elif command -v go >/dev/null 2>&1; then
+  runner=(go -C "$repo_root" run ./cmd/council)
+else
+  printf 'Council runner not found. Build %s/council or set COUNCIL_BIN.\n' "$repo_root" >&2
+  exit 127
+fi
+
+command=("${runner[@]}" ask --stdin)
+
+if [[ -n "${COUNCIL_CONFIG:-}" ]]; then
+  command+=(--config "$COUNCIL_CONFIG")
+elif [[ -f "$repo_root/council.yaml" ]]; then
+  command+=(--config "$repo_root/council.yaml")
+fi
+
+if [[ "$has_team_flag" == false ]]; then
+  command+=(--team "${COUNCIL_TEAM:-a-team}")
+fi
+
+if [[ -n "${COUNCIL_MAX_TIME:-}" ]]; then
+  command+=(--max-time "$COUNCIL_MAX_TIME")
+fi
+
+if [[ -n "${COUNCIL_MAX_ROUNDS:-}" ]]; then
+  command+=(--max-rounds "$COUNCIL_MAX_ROUNDS")
+fi
+
+if [[ "${COUNCIL_RETAIN_AGENT_OUTPUTS:-}" == "1" ]]; then
+  command+=(--retain-agent-outputs)
+fi
+
+if [[ "${COUNCIL_RETAIN_RAW_PROVIDER_IO:-}" == "1" ]]; then
+  command+=(--retain-raw-provider-io)
+fi
+
+if [[ "${COUNCIL_RETAIN_ARTIFACT_CONTENT:-}" == "1" ]]; then
+  command+=(--retain-artifact-content)
+fi
+
+exec "${command[@]}" "$@"
