@@ -50,6 +50,7 @@ Workflow:
     - `keep raw provider output` -> `--retain-raw-provider-io`
     - `retain artifact content` -> `--retain-artifact-content`
 14. Run Council through the repo-local wrapper from the project root using a Bash heredoc so the prompt text is preserved cleanly. Only pass actual Council flags you intentionally derived from the request. Capture Council's stdout as the answer body you will send back to the user.
+15. When invoking the wrapper through a Bash tool, always set an explicit timeout that safely exceeds the expected Council runtime. Do not rely on the Bash tool's default timeout. If you pass Council `--max-time`, set the Bash timeout longer than that by a safety margin. Otherwise use at least 900000 ms.
 
 ```bash
 /Users/drewrawitz/www/council/wrappers/council <derived flags> <<'EOF'
@@ -57,7 +58,8 @@ Workflow:
 EOF
 ```
 
-15. Return the synthesized Council answer in a normal assistant message, with the full Council output text in the message body. Do not say the answer is "already posted above", do not tell the user to inspect tool output, and do not replace the answer with a summary. Mention the run id only when it is useful for follow-up inspection.
+16. If the wrapper command fails, times out, or returns empty output, report that failure directly instead of silently substituting your own host-side review. Include the failure reason and, if available, the run id.
+17. Return the synthesized Council answer in a normal assistant message, with the full Council output text in the message body. Do not say the answer is "already posted above", do not tell the user to inspect tool output, and do not replace the answer with a summary. Mention the run id only when it is useful for follow-up inspection.
 
 Important UI note:
 - In hosts that tokenize slash commands inside the input box, do not invoke the nested slash command as a separate command chip while handling `/council`. Read the nested command's file and inline its instructions into the Council brief instead.

@@ -31,6 +31,8 @@ The slash-command layer should:
 - translate team mentions like `A-team` into `--team a-team`
 - translate explicit runtime requests like `run 2 rounds` into the matching Council flags
 - default to `a-team` when no team is specified
+- use an explicit long timeout when calling `wrappers/council` from a Bash-like tool, because Council runs can exceed common 2-minute tool defaults
+- surface wrapper failures directly instead of silently replacing Council with a host-authored answer
 
 Available entrypoints:
 - `wrappers/council`
