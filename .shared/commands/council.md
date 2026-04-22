@@ -54,7 +54,7 @@ Workflow:
 15. When invoking the wrapper through a Bash tool, always set an explicit timeout that safely exceeds the expected Council runtime. Do not rely on the Bash tool's default timeout. If you pass Council `--max-time`, set the Bash timeout longer than that by a safety margin. Otherwise use at least 900000 ms.
 
 ```bash
-/Users/drewrawitz/www/council/wrappers/council <derived flags> <<'EOF'
+./wrappers/council <derived flags> <<'EOF'
 <task brief>
 EOF
 ```
