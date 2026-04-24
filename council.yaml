@@ -13,6 +13,8 @@ providers:
       - ""
       - --model
       - "{model}"
+      - --effort
+      - xhigh
       - --system-prompt
       - "{system_prompt}"
       - "{prompt}"
@@ -62,9 +64,17 @@ agents:
       Take a strategic, first-principles view.
       Build the strongest plan, surface tradeoffs, and improve the structure of the answer.
 
+  opus-4_7:
+    provider: claude
+    model: claude-opus-4-7
+    role: strategic-architect
+    system_prompt: |
+      Take a strategic, first-principles view.
+      Build the strongest plan, surface tradeoffs, and improve the structure of the answer.
+
 teams:
   a-team:
-    members: [gpt-5_4-xhigh, opus-4_6]
+    members: [gpt-5_4-xhigh, opus-4_7]
     synthesizer: gpt-5_4-synth
     protocol: single-round
     run:

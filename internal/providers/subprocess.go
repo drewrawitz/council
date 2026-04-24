@@ -77,7 +77,7 @@ func (p *SubprocessProvider) Generate(ctx context.Context, req GenerateRequest) 
 	}
 
 	if err != nil {
-		return result, fmt.Errorf("run %q: %w", p.command, err)
+		return result, formatCommandFailure(p.command, err, result.RawStdout, result.RawStderr)
 	}
 
 	if outputFilePath != "" {
@@ -98,6 +98,33 @@ func (p *SubprocessProvider) Generate(ctx context.Context, req GenerateRequest) 
 	}
 
 	return result, nil
+}
+
+func formatCommandFailure(command string, err error, stdout string, stderr string) error {
+	snippet := summarizeCommandOutput(stderr)
+	if snippet == "" {
+		snippet = summarizeCommandOutput(stdout)
+	}
+
+	if snippet == "" {
+		return fmt.Errorf("run %q: %w", command, err)
+	}
+
+	return fmt.Errorf("run %q: %w\n%s", command, err, snippet)
+}
+
+func summarizeCommandOutput(output string) string {
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" {
+		return ""
+	}
+
+	lines := strings.Split(trimmed, "\n")
+	if len(lines) > 8 {
+		lines = lines[len(lines)-8:]
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 func (p *SubprocessProvider) buildStdinPayload(req GenerateRequest) (string, error) {

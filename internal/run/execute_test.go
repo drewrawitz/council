@@ -249,7 +249,7 @@ func TestExecuteStopsEarlyWhenItemsConvergeBeforeHardCap(t *testing.T) {
 	}
 }
 
-func TestExecutePersistsFailedRunWhenAgentInvocationFails(t *testing.T) {
+func TestExecutePersistsFailedRunWhenProviderCompatibilityCheckFails(t *testing.T) {
 	t.Parallel()
 
 	cfg := &model.Config{
@@ -310,8 +310,12 @@ func TestExecutePersistsFailedRunWhenAgentInvocationFails(t *testing.T) {
 		t.Fatalf("len(AgentOutputs) = %d, want 0 by default", len(record.AgentOutputs))
 	}
 
-	if !strings.Contains(record.Error, "agent round 1 failed") {
-		t.Fatalf("run error %q did not mention failed agent round", record.Error)
+	if !strings.Contains(record.Error, "provider compatibility check failed") {
+		t.Fatalf("run error %q did not mention failed compatibility check", record.Error)
+	}
+
+	if !strings.Contains(record.Error, "run \"/definitely/not/a/real/command\"") {
+		t.Fatalf("run error %q did not mention the failing provider command", record.Error)
 	}
 
 	loaded, loadErr := repo.Load(record.ID)
@@ -408,6 +412,74 @@ func TestExecutePersistsFailedRunWhenContextTimesOut(t *testing.T) {
 
 	if !strings.Contains(loaded.Error, "run timed out") {
 		t.Fatalf("loaded Error = %q, want timeout error", loaded.Error)
+	}
+}
+
+func TestExecuteFailsFastOnProviderCompatibilityErrors(t *testing.T) {
+	t.Parallel()
+
+	cfg := &model.Config{
+		Version: model.ConfigVersion,
+		Providers: map[string]model.ProviderConfig{
+			"broken": {
+				Type:    model.ProviderTypeSubprocess,
+				Command: "/bin/sh",
+				Args: []string{
+					"-c",
+					"printf 'The model %s does not exist or you do not have access to it.\n' \"$1\" >&2; exit 1",
+					"compat-check",
+					"{model}",
+				},
+			},
+		},
+		Agents: map[string]model.AgentConfig{
+			"broken-agent": {
+				Provider:     "broken",
+				Model:        "gpt-5.5",
+				Role:         "analyst",
+				SystemPrompt: "Try to answer the task.",
+			},
+		},
+		Teams: map[string]model.TeamConfig{
+			"default": {
+				Members:     []string{"broken-agent"},
+				Synthesizer: "broken-agent",
+				Protocol:    "single-round",
+			},
+		},
+		Protocols: map[string]model.ProtocolConfig{
+			"single-round": {Kind: model.ProtocolKindSingleRound},
+		},
+	}
+
+	repo := storage.NewRepository(filepath.Join(t.TempDir(), "runs"))
+	record, err := Execute(context.Background(), repo, cfg, "default", "Review this plan", nil, 1, RetentionOptions{}, nil)
+	if err == nil {
+		t.Fatal("Execute returned nil error for incompatible provider config")
+	}
+
+	if record == nil {
+		t.Fatal("Execute returned nil record for failed compatibility check")
+	}
+
+	if !strings.Contains(record.Error, "provider compatibility check failed") {
+		t.Fatalf("run error %q did not mention compatibility check failure", record.Error)
+	}
+
+	if !strings.Contains(record.Error, "gpt-5.5") {
+		t.Fatalf("run error %q did not mention the failing model", record.Error)
+	}
+
+	if !strings.Contains(record.Error, "does not exist or you do not have access to it") {
+		t.Fatalf("run error %q did not include provider output", record.Error)
+	}
+
+	if len(record.AgentOutputs) != 0 {
+		t.Fatalf("len(AgentOutputs) = %d, want 0 when compatibility check fails first", len(record.AgentOutputs))
+	}
+
+	if record.Synthesis != nil {
+		t.Fatalf("Synthesis = %#v, want nil when compatibility check fails", record.Synthesis)
 	}
 }
 

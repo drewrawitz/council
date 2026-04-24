@@ -5,6 +5,7 @@ import (
 	crand "crypto/rand"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -40,6 +41,8 @@ type Event struct {
 
 type Observer func(Event)
 
+const compatibilityProbePrompt = "Reply with exactly OK."
+
 func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, teamName string, prompt string, artifacts []model.Artifact, maxRounds int, retention RetentionOptions, observer Observer) (*model.RunRecord, error) {
 	if maxRounds <= 0 {
 		maxRounds = 1
@@ -69,6 +72,10 @@ func Execute(ctx context.Context, repo *storage.Repository, cfg *model.Config, t
 
 	providerSet, err := instantiateProviders(cfg)
 	if err != nil {
+		return failRun(repo, runRecord, retention, err)
+	}
+
+	if err := checkTeamProviderCompatibility(ctx, cfg, teamName, providerSet); err != nil {
 		return failRun(repo, runRecord, retention, err)
 	}
 
@@ -341,6 +348,85 @@ func instantiateProviders(cfg *model.Config) (map[string]providers.Provider, err
 	}
 
 	return providerSet, nil
+}
+
+func checkTeamProviderCompatibility(ctx context.Context, cfg *model.Config, teamName string, providerSet map[string]providers.Provider) error {
+	team, ok := cfg.Teams[teamName]
+	if !ok {
+		return fmt.Errorf("team %q does not exist", teamName)
+	}
+
+	agentNames := append([]string(nil), team.Members...)
+	memberSet := make(map[string]struct{}, len(team.Members))
+	for _, member := range team.Members {
+		memberSet[member] = struct{}{}
+	}
+	if _, ok := memberSet[team.Synthesizer]; !ok {
+		agentNames = append(agentNames, team.Synthesizer)
+	}
+
+	checked := make(map[string]struct{}, len(agentNames))
+	problems := make([]string, 0)
+	for _, agentName := range agentNames {
+		agent := cfg.Agents[agentName]
+		key := agent.Provider + "\x00" + agent.Model
+		if _, ok := checked[key]; ok {
+			continue
+		}
+		checked[key] = struct{}{}
+
+		provider := providerSet[agent.Provider]
+		probeCtx, cancel := context.WithTimeout(baseCompatibilityContext(ctx), 30*time.Second)
+		_, err := provider.Generate(probeCtx, providers.GenerateRequest{
+			RunID:        "compatibility-check",
+			AgentName:    agentName,
+			Model:        agent.Model,
+			SystemPrompt: compatibilityProbePrompt,
+			UserPrompt:   compatibilityProbePrompt,
+			Settings:     agent.Settings,
+		})
+		err = normalizeProviderError(probeCtx, err)
+		cancel()
+		if err == nil {
+			continue
+		}
+
+		if ctxErr := executionContextError(ctx); ctxErr != nil {
+			return ctxErr
+		}
+
+		providerConfig := cfg.Providers[agent.Provider]
+		problem := fmt.Sprintf("%s via %s (%s): %v", agentName, agent.Provider, agent.Model, err)
+		if hint := compatibilityHint(providerConfig); hint != "" {
+			problem += "\n  " + hint
+		}
+		problems = append(problems, problem)
+	}
+
+	if len(problems) > 0 {
+		return fmt.Errorf("provider compatibility check failed:\n- %s", strings.Join(problems, "\n- "))
+	}
+
+	return nil
+}
+
+func baseCompatibilityContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+
+	return ctx
+}
+
+func compatibilityHint(provider model.ProviderConfig) string {
+	switch filepath.Base(strings.TrimSpace(provider.Command)) {
+	case "codex":
+		return "hint: run `codex debug models` to list exact model IDs and supported reasoning levels"
+	case "claude":
+		return "hint: run `claude --help` for accepted `--effort` values, then probe with `claude --print --model <id> --effort xhigh \"Reply with OK.\"`"
+	default:
+		return ""
+	}
 }
 
 func collectOutputErrors(outputs []model.AgentOutput) []string {
